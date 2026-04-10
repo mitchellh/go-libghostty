@@ -398,6 +398,22 @@ const (
 	KittyKeyAll KittyKeyFlags = C.GHOSTTY_KITTY_KEY_ALL
 )
 
+// KittyGraphics returns the Kitty graphics image storage for the
+// terminal's active screen. The returned handle is borrowed from
+// the terminal and remains valid until the next mutating call
+// (e.g. VTWrite or Reset).
+func (t *Terminal) KittyGraphics() (*KittyGraphics, error) {
+	var ptr C.GhosttyKittyGraphics
+	if err := resultError(C.ghostty_terminal_get(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS,
+		unsafe.Pointer(&ptr),
+	)); err != nil {
+		return nil, err
+	}
+	return &KittyGraphics{ptr: ptr}, nil
+}
+
 // GridRef resolves a point in the terminal grid to a grid reference.
 // The returned GridRef is only valid until the next terminal update.
 //

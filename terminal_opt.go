@@ -143,6 +143,56 @@ func (t *Terminal) SetPwd(pwd string) error {
 	))
 }
 
+// SetKittyImageStorageLimit sets the Kitty image storage limit in bytes.
+// Applied to all initialized screens (primary and alternate). A value of
+// zero disables the Kitty graphics protocol entirely, deleting all stored
+// images and placements. Pass nil to disable (equivalent to zero).
+func (t *Terminal) SetKittyImageStorageLimit(limit *uint64) error {
+	var val unsafe.Pointer
+	if limit != nil {
+		v := C.uint64_t(*limit)
+		val = unsafe.Pointer(&v)
+	}
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT,
+		val,
+	))
+}
+
+// SetKittyImageMediumFile enables or disables Kitty image loading via the
+// file medium.
+func (t *Terminal) SetKittyImageMediumFile(enabled bool) error {
+	v := C.bool(enabled)
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_FILE,
+		unsafe.Pointer(&v),
+	))
+}
+
+// SetKittyImageMediumTempFile enables or disables Kitty image loading via
+// the temporary file medium.
+func (t *Terminal) SetKittyImageMediumTempFile(enabled bool) error {
+	v := C.bool(enabled)
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE,
+		unsafe.Pointer(&v),
+	))
+}
+
+// SetKittyImageMediumSharedMem enables or disables Kitty image loading via
+// the shared memory medium.
+func (t *Terminal) SetKittyImageMediumSharedMem(enabled bool) error {
+	v := C.bool(enabled)
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_SHARED_MEM,
+		unsafe.Pointer(&v),
+	))
+}
+
 // SetTitle sets the terminal title manually. An empty string clears it.
 func (t *Terminal) SetTitle(title string) error {
 	s := C.GhosttyString{
