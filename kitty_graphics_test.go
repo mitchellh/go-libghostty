@@ -321,6 +321,192 @@ func TestKittyGraphicsPlacementIteration(t *testing.T) {
 	}
 }
 
+func TestKittyGraphicsImageInfo(t *testing.T) {
+	term := newKittyTerminal(t)
+	defer term.Close()
+
+	sendKittyImage(t, term)
+
+	kg, err := term.KittyGraphics()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	iter, err := NewKittyGraphicsPlacementIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer iter.Close()
+
+	if err := kg.PlacementIterator(iter); err != nil {
+		t.Fatal(err)
+	}
+
+	if !iter.Next() {
+		t.Fatal("expected at least one placement")
+	}
+
+	imageID, err := iter.ImageID()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	img := kg.Image(imageID)
+	if img == nil {
+		t.Fatal("expected non-nil image")
+	}
+
+	info, err := img.Info()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if info.ID != imageID {
+		t.Fatalf("expected image ID %d, got %d", imageID, info.ID)
+	}
+	if info.Width != 1 || info.Height != 1 {
+		t.Fatalf("expected 1x1 image, got %dx%d", info.Width, info.Height)
+	}
+	if info.Format != KittyImageFormatRGBA {
+		t.Fatalf("expected RGBA format, got %d", info.Format)
+	}
+	if info.Compression != KittyImageCompressionNone {
+		t.Fatalf("expected no compression, got %d", info.Compression)
+	}
+	if len(info.Data) != 4 {
+		t.Fatalf("expected 4 bytes of pixel data, got %d", len(info.Data))
+	}
+}
+
+func TestKittyGraphicsPlacementInfo(t *testing.T) {
+	term := newKittyTerminal(t)
+	defer term.Close()
+
+	sendKittyImage(t, term)
+
+	kg, err := term.KittyGraphics()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	iter, err := NewKittyGraphicsPlacementIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer iter.Close()
+
+	if err := kg.PlacementIterator(iter); err != nil {
+		t.Fatal(err)
+	}
+
+	if !iter.Next() {
+		t.Fatal("expected at least one placement")
+	}
+
+	info, err := iter.Info()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the info matches individual getters.
+	imageID, err := iter.ImageID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.ImageID != imageID {
+		t.Fatalf("expected image ID %d, got %d", imageID, info.ImageID)
+	}
+
+	isVirtual, err := iter.IsVirtual()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.IsVirtual != isVirtual {
+		t.Fatalf("expected IsVirtual=%v, got %v", isVirtual, info.IsVirtual)
+	}
+
+	z, err := iter.Z()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Z != z {
+		t.Fatalf("expected Z=%d, got %d", z, info.Z)
+	}
+}
+
+func TestKittyGraphicsPlacementRenderInfo(t *testing.T) {
+	term := newKittyTerminal(t)
+	defer term.Close()
+
+	sendKittyImage(t, term)
+
+	kg, err := term.KittyGraphics()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	iter, err := NewKittyGraphicsPlacementIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer iter.Close()
+
+	if err := kg.PlacementIterator(iter); err != nil {
+		t.Fatal(err)
+	}
+
+	if !iter.Next() {
+		t.Fatal("expected at least one placement")
+	}
+
+	imageID, err := iter.ImageID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := kg.Image(imageID)
+	if img == nil {
+		t.Fatal("expected image lookup to succeed")
+	}
+
+	ri, err := iter.RenderInfo(img, term)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify render info matches individual calls.
+	pw, ph, err := iter.PixelSize(img, term)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ri.PixelWidth != pw || ri.PixelHeight != ph {
+		t.Fatalf("pixel size mismatch: RenderInfo=%dx%d, PixelSize=%dx%d",
+			ri.PixelWidth, ri.PixelHeight, pw, ph)
+	}
+
+	gc, gr, err := iter.GridSize(img, term)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ri.GridCols != gc || ri.GridRows != gr {
+		t.Fatalf("grid size mismatch: RenderInfo=%dx%d, GridSize=%dx%d",
+			ri.GridCols, ri.GridRows, gc, gr)
+	}
+
+	_, _, sw, sh, err := iter.SourceRect(img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ri.SourceWidth != sw || ri.SourceHeight != sh {
+		t.Fatalf("source rect size mismatch: RenderInfo=%dx%d, SourceRect=%dx%d",
+			ri.SourceWidth, ri.SourceHeight, sw, sh)
+	}
+
+	// A freshly placed image should be viewport-visible.
+	if !ri.ViewportVisible {
+		t.Fatal("expected placement to be viewport-visible")
+	}
+}
+
 func TestKittyGraphicsPlacementLayerFilter(t *testing.T) {
 	term := newKittyTerminal(t)
 	defer term.Close()

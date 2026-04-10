@@ -12,6 +12,24 @@ static inline GhosttySelection init_selection() {
 	GhosttySelection s = GHOSTTY_INIT_SIZED(GhosttySelection);
 	return s;
 }
+
+// Helper to create a properly initialized GhosttyKittyGraphicsImageInfo (sized struct).
+static inline GhosttyKittyGraphicsImageInfo init_kitty_image_info() {
+	GhosttyKittyGraphicsImageInfo info = GHOSTTY_INIT_SIZED(GhosttyKittyGraphicsImageInfo);
+	return info;
+}
+
+// Helper to create a properly initialized GhosttyKittyGraphicsPlacementInfo (sized struct).
+static inline GhosttyKittyGraphicsPlacementInfo init_kitty_placement_info() {
+	GhosttyKittyGraphicsPlacementInfo info = GHOSTTY_INIT_SIZED(GhosttyKittyGraphicsPlacementInfo);
+	return info;
+}
+
+// Helper to create a properly initialized GhosttyKittyGraphicsPlacementRenderInfo (sized struct).
+static inline GhosttyKittyGraphicsPlacementRenderInfo init_kitty_placement_render_info() {
+	GhosttyKittyGraphicsPlacementRenderInfo info = GHOSTTY_INIT_SIZED(GhosttyKittyGraphicsPlacementRenderInfo);
+	return info;
+}
 */
 import "C"
 
@@ -127,6 +145,122 @@ func selectionFromC(cs C.GhosttySelection) Selection {
 	}
 }
 
+// KittyGraphicsImageInfo contains all image metadata in a single struct.
+// This is more efficient than querying each field individually since it
+// requires only one cgo call.
+//
+// C: GhosttyKittyGraphicsImageInfo
+type KittyGraphicsImageInfo struct {
+	// ID is the image ID.
+	ID uint32
+
+	// Number is the image number.
+	Number uint32
+
+	// Width is the image width in pixels.
+	Width uint32
+
+	// Height is the image height in pixels.
+	Height uint32
+
+	// Format is the pixel format of the image.
+	Format KittyImageFormat
+
+	// Compression is the compression of the image.
+	Compression KittyImageCompression
+
+	// Data is a borrowed slice of the raw pixel data. Only valid
+	// until the next mutating terminal call.
+	Data []byte
+}
+
+// KittyGraphicsPlacementInfo contains all placement metadata in a single
+// struct. This is more efficient than querying each field individually
+// since it requires only one cgo call.
+//
+// C: GhosttyKittyGraphicsPlacementInfo
+type KittyGraphicsPlacementInfo struct {
+	// ImageID is the image ID this placement belongs to.
+	ImageID uint32
+
+	// PlacementID is the placement ID.
+	PlacementID uint32
+
+	// IsVirtual indicates whether this is a virtual placement (unicode placeholder).
+	IsVirtual bool
+
+	// XOffset is the pixel offset from the left edge of the cell.
+	XOffset uint32
+
+	// YOffset is the pixel offset from the top edge of the cell.
+	YOffset uint32
+
+	// SourceX is the source rectangle x origin in pixels.
+	SourceX uint32
+
+	// SourceY is the source rectangle y origin in pixels.
+	SourceY uint32
+
+	// SourceWidth is the source rectangle width in pixels (0 = full image width).
+	SourceWidth uint32
+
+	// SourceHeight is the source rectangle height in pixels (0 = full image height).
+	SourceHeight uint32
+
+	// Columns is the number of columns this placement occupies.
+	Columns uint32
+
+	// Rows is the number of rows this placement occupies.
+	Rows uint32
+
+	// Z is the z-index for this placement.
+	Z int32
+}
+
+// KittyGraphicsPlacementRenderInfo contains all rendering geometry for a
+// placement in a single struct. Combines pixel size, grid size, viewport
+// position, and source rectangle into one cgo call.
+//
+// C: GhosttyKittyGraphicsPlacementRenderInfo
+type KittyGraphicsPlacementRenderInfo struct {
+	// PixelWidth is the rendered width in pixels.
+	PixelWidth uint32
+
+	// PixelHeight is the rendered height in pixels.
+	PixelHeight uint32
+
+	// GridCols is the number of grid columns the placement occupies.
+	GridCols uint32
+
+	// GridRows is the number of grid rows the placement occupies.
+	GridRows uint32
+
+	// ViewportCol is the viewport-relative column (may be negative
+	// for partially visible placements).
+	ViewportCol int32
+
+	// ViewportRow is the viewport-relative row (may be negative
+	// for partially visible placements).
+	ViewportRow int32
+
+	// ViewportVisible is false when the placement is fully off-screen
+	// or is a virtual placement. When false, ViewportCol and ViewportRow
+	// may contain meaningless values.
+	ViewportVisible bool
+
+	// SourceX is the resolved source rectangle x origin in pixels.
+	SourceX uint32
+
+	// SourceY is the resolved source rectangle y origin in pixels.
+	SourceY uint32
+
+	// SourceWidth is the resolved source rectangle width in pixels.
+	SourceWidth uint32
+
+	// SourceHeight is the resolved source rectangle height in pixels.
+	SourceHeight uint32
+}
+
 // PlacementIterator populates the given iterator with placement data
 // from this storage. The iterator must have been created with
 // NewKittyGraphicsPlacementIterator.
@@ -224,6 +358,35 @@ func (img *KittyGraphicsImage) Compression() (KittyImageCompression, error) {
 		return 0, err
 	}
 	return KittyImageCompression(v), nil
+}
+
+// Info returns all image metadata in a single call. This is more
+// efficient than calling ID, Number, Width, Height, Format,
+// Compression, and Data individually.
+func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
+	ci := C.init_kitty_image_info()
+	if err := resultError(C.ghostty_kitty_graphics_image_get(
+		img.ptr,
+		C.GHOSTTY_KITTY_IMAGE_DATA_INFO,
+		unsafe.Pointer(&ci),
+	)); err != nil {
+		return nil, err
+	}
+
+	info := &KittyGraphicsImageInfo{
+		ID:          uint32(ci.id),
+		Number:      uint32(ci.number),
+		Width:       uint32(ci.width),
+		Height:      uint32(ci.height),
+		Format:      KittyImageFormat(ci.format),
+		Compression: KittyImageCompression(ci.compression),
+	}
+
+	if ci.data_ptr != nil && ci.data_len > 0 {
+		info.Data = unsafe.Slice((*byte)(unsafe.Pointer(ci.data_ptr)), int(ci.data_len))
+	}
+
+	return info, nil
 }
 
 // Data returns a borrowed slice of the raw pixel data. The slice is
@@ -447,6 +610,69 @@ func (it *KittyGraphicsPlacementIterator) Z() (int32, error) {
 		return 0, err
 	}
 	return int32(v), nil
+}
+
+// Info returns all placement metadata in a single call. This is more
+// efficient than calling ImageID, PlacementID, IsVirtual, XOffset,
+// YOffset, SourceX, SourceY, SourceWidth, SourceHeight, Columns,
+// Rows, and Z individually.
+func (it *KittyGraphicsPlacementIterator) Info() (*KittyGraphicsPlacementInfo, error) {
+	ci := C.init_kitty_placement_info()
+	if err := resultError(C.ghostty_kitty_graphics_placement_get(
+		it.ptr,
+		C.GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_INFO,
+		unsafe.Pointer(&ci),
+	)); err != nil {
+		return nil, err
+	}
+
+	return &KittyGraphicsPlacementInfo{
+		ImageID:      uint32(ci.image_id),
+		PlacementID:  uint32(ci.placement_id),
+		IsVirtual:    bool(ci.is_virtual),
+		XOffset:      uint32(ci.x_offset),
+		YOffset:      uint32(ci.y_offset),
+		SourceX:      uint32(ci.source_x),
+		SourceY:      uint32(ci.source_y),
+		SourceWidth:  uint32(ci.source_width),
+		SourceHeight: uint32(ci.source_height),
+		Columns:      uint32(ci.columns),
+		Rows:         uint32(ci.rows),
+		Z:            int32(ci.z),
+	}, nil
+}
+
+// RenderInfo returns all rendering geometry for the current placement
+// in a single call. This combines the results of PixelSize, GridSize,
+// ViewportPos, and SourceRect into one cgo call.
+//
+// When ViewportVisible is false, the placement is fully off-screen or
+// is a virtual placement; ViewportCol and ViewportRow may contain
+// meaningless values in that case.
+func (it *KittyGraphicsPlacementIterator) RenderInfo(img *KittyGraphicsImage, t *Terminal) (*KittyGraphicsPlacementRenderInfo, error) {
+	ci := C.init_kitty_placement_render_info()
+	if err := resultError(C.ghostty_kitty_graphics_placement_render_info(
+		it.ptr,
+		img.ptr,
+		t.ptr,
+		&ci,
+	)); err != nil {
+		return nil, err
+	}
+
+	return &KittyGraphicsPlacementRenderInfo{
+		PixelWidth:      uint32(ci.pixel_width),
+		PixelHeight:     uint32(ci.pixel_height),
+		GridCols:        uint32(ci.grid_cols),
+		GridRows:        uint32(ci.grid_rows),
+		ViewportCol:     int32(ci.viewport_col),
+		ViewportRow:     int32(ci.viewport_row),
+		ViewportVisible: bool(ci.viewport_visible),
+		SourceX:         uint32(ci.source_x),
+		SourceY:         uint32(ci.source_y),
+		SourceWidth:     uint32(ci.source_width),
+		SourceHeight:    uint32(ci.source_height),
+	}, nil
 }
 
 // Rect computes the grid rectangle occupied by the current placement.
