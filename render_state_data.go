@@ -5,6 +5,7 @@ package libghostty
 // Functions are ordered alphabetically.
 
 /*
+#include <stdlib.h>
 #include <ghostty/vt.h>
 
 // Helper to create a properly initialized GhosttyRenderStateColors (sized struct).
@@ -18,6 +19,81 @@ import "C"
 import (
 	"errors"
 	"unsafe"
+)
+
+// RenderStateData identifies a data field for render state queries.
+// C: GhosttyRenderStateData
+type RenderStateData int
+
+const (
+	// RenderStateDataInvalid is an invalid / sentinel value.
+	RenderStateDataInvalid RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_INVALID
+
+	// RenderStateDataCols is the viewport width in cells (uint16_t).
+	RenderStateDataCols RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_COLS
+
+	// RenderStateDataRows is the viewport height in cells (uint16_t).
+	RenderStateDataRows RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_ROWS
+
+	// RenderStateDataDirty is the current dirty state
+	// (GhosttyRenderStateDirty).
+	RenderStateDataDirty RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_DIRTY
+
+	// RenderStateDataRowIterator populates a pre-allocated row iterator
+	// (GhosttyRenderStateRowIterator).
+	RenderStateDataRowIterator RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR
+
+	// RenderStateDataColorBackground is the default/current background
+	// color (GhosttyColorRgb).
+	RenderStateDataColorBackground RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_COLOR_BACKGROUND
+
+	// RenderStateDataColorForeground is the default/current foreground
+	// color (GhosttyColorRgb).
+	RenderStateDataColorForeground RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_COLOR_FOREGROUND
+
+	// RenderStateDataColorCursor is the cursor color when explicitly set
+	// (GhosttyColorRgb).
+	RenderStateDataColorCursor RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_COLOR_CURSOR
+
+	// RenderStateDataColorCursorHasValue indicates whether an explicit
+	// cursor color is set (bool).
+	RenderStateDataColorCursorHasValue RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_COLOR_CURSOR_HAS_VALUE
+
+	// RenderStateDataColorPalette is the active 256-color palette
+	// (GhosttyColorRgb[256]).
+	RenderStateDataColorPalette RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_COLOR_PALETTE
+
+	// RenderStateDataCursorVisualStyle is the visual style of the cursor
+	// (GhosttyRenderStateCursorVisualStyle).
+	RenderStateDataCursorVisualStyle RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE
+
+	// RenderStateDataCursorVisible indicates whether the cursor is visible
+	// based on terminal modes (bool).
+	RenderStateDataCursorVisible RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISIBLE
+
+	// RenderStateDataCursorBlinking indicates whether the cursor should
+	// blink based on terminal modes (bool).
+	RenderStateDataCursorBlinking RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_CURSOR_BLINKING
+
+	// RenderStateDataCursorPasswordInput indicates whether the cursor is
+	// at a password input field (bool).
+	RenderStateDataCursorPasswordInput RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_CURSOR_PASSWORD_INPUT
+
+	// RenderStateDataCursorViewportHasValue indicates whether the cursor
+	// is visible within the viewport (bool).
+	RenderStateDataCursorViewportHasValue RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_HAS_VALUE
+
+	// RenderStateDataCursorViewportX is the cursor viewport x position
+	// in cells (uint16_t).
+	RenderStateDataCursorViewportX RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_X
+
+	// RenderStateDataCursorViewportY is the cursor viewport y position
+	// in cells (uint16_t).
+	RenderStateDataCursorViewportY RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_Y
+
+	// RenderStateDataCursorViewportWideTail indicates whether the cursor
+	// is on the tail of a wide character (bool).
+	RenderStateDataCursorViewportWideTail RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_WIDE_TAIL
 )
 
 // Cols returns the viewport width in cells.
@@ -104,6 +180,44 @@ func (rs *RenderState) Colors() (*RenderStateColors, error) {
 		result.Palette[i] = ColorRGB{R: uint8(c.r), G: uint8(c.g), B: uint8(c.b)}
 	}
 	return result, nil
+}
+
+// GetMulti queries multiple render state data fields in a single cgo
+// call. This is a low-level function; prefer the typed getters (Cols,
+// Rows, CursorVisible, etc.) for normal use. GetMulti is useful when
+// you need many fields at once and want to avoid per-field cgo overhead.
+//
+// Each element in keys specifies a data kind, and the corresponding
+// element in values must be an unsafe.Pointer to a variable whose type
+// matches the "Output type" documented for that key in the upstream C
+// header (ghostty/vt/render.h, GhosttyRenderStateData enum).
+//
+// Example:
+//
+//	var cols, rows C.uint16_t
+//	err := rs.GetMulti(
+//		[]RenderStateData{RenderStateDataCols, RenderStateDataRows},
+//		[]unsafe.Pointer{unsafe.Pointer(&cols), unsafe.Pointer(&rows)},
+//	)
+//
+// C: ghostty_render_state_get_multi
+func (rs *RenderState) GetMulti(keys []RenderStateData, values []unsafe.Pointer) error {
+	if len(keys) != len(values) {
+		return errors.New("libghostty: keys and values must have the same length")
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
+	cVals := cValuesArray(values)
+	defer C.free(unsafe.Pointer(cVals))
+	return resultError(C.ghostty_render_state_get_multi(
+		rs.ptr,
+		C.size_t(len(keys)),
+		(*C.GhosttyRenderStateData)(unsafe.Pointer(&keys[0])),
+		cVals,
+		nil,
+	))
 }
 
 // CursorBlinking reports whether the cursor should blink based on

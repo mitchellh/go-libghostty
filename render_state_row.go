@@ -4,11 +4,35 @@ package libghostty
 // GhosttyRenderStateRowIterator C APIs.
 
 /*
+#include <stdlib.h>
 #include <ghostty/vt.h>
 */
 import "C"
 
-import "unsafe"
+import (
+	"errors"
+	"unsafe"
+)
+
+// RenderStateRowData identifies a data field for render state row queries.
+// C: GhosttyRenderStateRowData
+type RenderStateRowData int
+
+const (
+	// RenderStateRowDataInvalid is an invalid / sentinel value.
+	RenderStateRowDataInvalid RenderStateRowData = C.GHOSTTY_RENDER_STATE_ROW_DATA_INVALID
+
+	// RenderStateRowDataDirty indicates whether the current row is dirty
+	// (bool).
+	RenderStateRowDataDirty RenderStateRowData = C.GHOSTTY_RENDER_STATE_ROW_DATA_DIRTY
+
+	// RenderStateRowDataRaw is the raw row value (GhosttyRow).
+	RenderStateRowDataRaw RenderStateRowData = C.GHOSTTY_RENDER_STATE_ROW_DATA_RAW
+
+	// RenderStateRowDataCells populates a pre-allocated row cells instance
+	// (GhosttyRenderStateRowCells).
+	RenderStateRowDataCells RenderStateRowData = C.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS
+)
 
 // RenderStateRowIterator iterates over rows in a render state.
 // Create one with NewRenderStateRowIterator, populate it via
@@ -45,6 +69,45 @@ func (ri *RenderStateRowIterator) Close() {
 // false when there are no more rows.
 func (ri *RenderStateRowIterator) Next() bool {
 	return bool(C.ghostty_render_state_row_iterator_next(ri.ptr))
+}
+
+// GetMulti queries multiple render-state row data fields in a single
+// cgo call. This is a low-level function; prefer the typed getters
+// (Dirty, Raw, Cells) for normal use. GetMulti is useful when you
+// need many fields at once and want to avoid per-field cgo overhead.
+//
+// Each element in keys specifies a data kind, and the corresponding
+// element in values must be an unsafe.Pointer to a variable whose type
+// matches the "Output type" documented for that key in the upstream C
+// header (ghostty/vt/render.h, GhosttyRenderStateRowData enum).
+//
+// Example:
+//
+//	var dirty C.bool
+//	var raw C.GhosttyRow
+//	err := ri.GetMulti(
+//		[]RenderStateRowData{RenderStateRowDataDirty, RenderStateRowDataRaw},
+//		[]unsafe.Pointer{unsafe.Pointer(&dirty), unsafe.Pointer(&raw)},
+//	)
+//
+// C: ghostty_render_state_row_get_multi
+func (ri *RenderStateRowIterator) GetMulti(keys []RenderStateRowData, values []unsafe.Pointer) error {
+	if len(keys) != len(values) {
+		return errors.New("libghostty: keys and values must have the same length")
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
+	cVals := cValuesArray(values)
+	defer C.free(unsafe.Pointer(cVals))
+	return resultError(C.ghostty_render_state_row_get_multi(
+		ri.ptr,
+		C.size_t(len(keys)),
+		(*C.GhosttyRenderStateRowData)(unsafe.Pointer(&keys[0])),
+		cVals,
+		nil,
+	))
 }
 
 // Dirty reports whether the current row is dirty and requires a
