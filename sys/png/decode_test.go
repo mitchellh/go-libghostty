@@ -1,14 +1,14 @@
-package libghostty
+package png
 
 import (
 	"bytes"
 	"image"
 	"image/color"
-	"image/png"
+	goimg "image/png"
 	"testing"
 )
 
-func TestSysDecodePng(t *testing.T) {
+func TestDecode(t *testing.T) {
 	// Encode a small 2x2 NRGBA PNG in-memory.
 	src := image.NewNRGBA(image.Rect(0, 0, 2, 2))
 	src.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 255})
@@ -17,13 +17,13 @@ func TestSysDecodePng(t *testing.T) {
 	src.SetNRGBA(1, 1, color.NRGBA{R: 255, G: 255, B: 255, A: 255})
 
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, src); err != nil {
+	if err := goimg.Encode(&buf, src); err != nil {
 		t.Fatalf("png.Encode: %v", err)
 	}
 
-	img, err := SysDecodePng(buf.Bytes())
+	img, err := Decode(buf.Bytes())
 	if err != nil {
-		t.Fatalf("SysDecodePng: %v", err)
+		t.Fatalf("Decode: %v", err)
 	}
 
 	if img.Width != 2 || img.Height != 2 {
@@ -41,27 +41,27 @@ func TestSysDecodePng(t *testing.T) {
 	}
 }
 
-func TestSysDecodePngInvalid(t *testing.T) {
-	_, err := SysDecodePng([]byte("not a png"))
+func TestDecodeInvalid(t *testing.T) {
+	_, err := Decode([]byte("not a png"))
 	if err == nil {
-		t.Fatal("SysDecodePng(invalid) = nil error, want error")
+		t.Fatal("Decode(invalid) = nil error, want error")
 	}
 }
 
-func TestSysDecodePngRGBA(t *testing.T) {
+func TestDecodeRGBA(t *testing.T) {
 	// Use an RGBA image (premultiplied alpha) to exercise the slow path
 	// conversion to NRGBA.
 	src := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	src.SetRGBA(0, 0, color.RGBA{R: 128, G: 0, B: 0, A: 128})
 
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, src); err != nil {
+	if err := goimg.Encode(&buf, src); err != nil {
 		t.Fatalf("png.Encode: %v", err)
 	}
 
-	img, err := SysDecodePng(buf.Bytes())
+	img, err := Decode(buf.Bytes())
 	if err != nil {
-		t.Fatalf("SysDecodePng: %v", err)
+		t.Fatalf("Decode: %v", err)
 	}
 
 	if img.Width != 1 || img.Height != 1 {

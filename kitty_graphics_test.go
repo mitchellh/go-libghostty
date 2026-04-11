@@ -1,8 +1,34 @@
 package libghostty
 
 import (
+	"bytes"
+	"fmt"
+	"image"
+	"image/png"
 	"testing"
 )
+
+// testDecodePng is a minimal SysDecodePngFn for tests. It avoids
+// importing the syspng subpackage (which would create an import cycle
+// in internal tests) by inlining the same logic.
+func testDecodePng(data []byte) (*SysImage, error) {
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("png decode: %w", err)
+	}
+	bounds := img.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	if nrgba, ok := img.(*image.NRGBA); ok {
+		return &SysImage{Width: uint32(w), Height: uint32(h), Data: nrgba.Pix}, nil
+	}
+	dst := image.NewNRGBA(bounds)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			dst.Set(x, y, img.At(x, y))
+		}
+	}
+	return &SysImage{Width: uint32(w), Height: uint32(h), Data: dst.Pix}, nil
+}
 
 // newKittyTerminal creates a terminal with Kitty graphics enabled
 // (PNG decode callback, WritePty handler, storage limit, and cell
@@ -11,7 +37,7 @@ func newKittyTerminal(t *testing.T) *Terminal {
 	t.Helper()
 
 	// Install the PNG decoder.
-	if err := SysSetDecodePng(SysDecodePng); err != nil {
+	if err := SysSetDecodePng(testDecodePng); err != nil {
 		t.Fatal(err)
 	}
 
