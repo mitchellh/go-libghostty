@@ -4,6 +4,7 @@ package libghostty
 // Functions are ordered alphabetically.
 
 /*
+#include <stdlib.h>
 #include <ghostty/vt.h>
 */
 import "C"
@@ -11,6 +12,129 @@ import "C"
 import (
 	"errors"
 	"unsafe"
+)
+
+// TerminalData identifies a data field for terminal queries.
+// C: GhosttyTerminalData
+type TerminalData int
+
+const (
+	// TerminalDataInvalid is an invalid / sentinel value.
+	TerminalDataInvalid TerminalData = C.GHOSTTY_TERMINAL_DATA_INVALID
+
+	// TerminalDataCols is the terminal width in cells (uint16_t).
+	TerminalDataCols TerminalData = C.GHOSTTY_TERMINAL_DATA_COLS
+
+	// TerminalDataRows is the terminal height in cells (uint16_t).
+	TerminalDataRows TerminalData = C.GHOSTTY_TERMINAL_DATA_ROWS
+
+	// TerminalDataCursorX is the cursor column position, 0-indexed (uint16_t).
+	TerminalDataCursorX TerminalData = C.GHOSTTY_TERMINAL_DATA_CURSOR_X
+
+	// TerminalDataCursorY is the cursor row position within the active area,
+	// 0-indexed (uint16_t).
+	TerminalDataCursorY TerminalData = C.GHOSTTY_TERMINAL_DATA_CURSOR_Y
+
+	// TerminalDataCursorPendingWrap indicates whether the cursor has a
+	// pending wrap (bool).
+	TerminalDataCursorPendingWrap TerminalData = C.GHOSTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP
+
+	// TerminalDataActiveScreen is the currently active screen
+	// (GhosttyTerminalScreen).
+	TerminalDataActiveScreen TerminalData = C.GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN
+
+	// TerminalDataCursorVisible indicates whether the cursor is visible,
+	// DEC mode 25 (bool).
+	TerminalDataCursorVisible TerminalData = C.GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE
+
+	// TerminalDataKittyKeyboardFlags is the current Kitty keyboard protocol
+	// flags (uint8_t).
+	TerminalDataKittyKeyboardFlags TerminalData = C.GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS
+
+	// TerminalDataScrollbar is the scrollbar state for the terminal viewport
+	// (GhosttyTerminalScrollbar).
+	TerminalDataScrollbar TerminalData = C.GHOSTTY_TERMINAL_DATA_SCROLLBAR
+
+	// TerminalDataCursorStyle is the current SGR style of the cursor
+	// (GhosttyStyle).
+	TerminalDataCursorStyle TerminalData = C.GHOSTTY_TERMINAL_DATA_CURSOR_STYLE
+
+	// TerminalDataMouseTracking indicates whether any mouse tracking mode
+	// is active (bool).
+	TerminalDataMouseTracking TerminalData = C.GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING
+
+	// TerminalDataTitle is the terminal title as set by escape sequences
+	// (GhosttyString).
+	TerminalDataTitle TerminalData = C.GHOSTTY_TERMINAL_DATA_TITLE
+
+	// TerminalDataPwd is the terminal's current working directory as set
+	// by escape sequences (GhosttyString).
+	TerminalDataPwd TerminalData = C.GHOSTTY_TERMINAL_DATA_PWD
+
+	// TerminalDataTotalRows is the total number of rows in the active screen
+	// including scrollback (size_t).
+	TerminalDataTotalRows TerminalData = C.GHOSTTY_TERMINAL_DATA_TOTAL_ROWS
+
+	// TerminalDataScrollbackRows is the number of scrollback rows (size_t).
+	TerminalDataScrollbackRows TerminalData = C.GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS
+
+	// TerminalDataWidthPx is the total terminal width in pixels (uint32_t).
+	TerminalDataWidthPx TerminalData = C.GHOSTTY_TERMINAL_DATA_WIDTH_PX
+
+	// TerminalDataHeightPx is the total terminal height in pixels (uint32_t).
+	TerminalDataHeightPx TerminalData = C.GHOSTTY_TERMINAL_DATA_HEIGHT_PX
+
+	// TerminalDataColorForeground is the effective foreground color
+	// (GhosttyColorRgb).
+	TerminalDataColorForeground TerminalData = C.GHOSTTY_TERMINAL_DATA_COLOR_FOREGROUND
+
+	// TerminalDataColorBackground is the effective background color
+	// (GhosttyColorRgb).
+	TerminalDataColorBackground TerminalData = C.GHOSTTY_TERMINAL_DATA_COLOR_BACKGROUND
+
+	// TerminalDataColorCursor is the effective cursor color
+	// (GhosttyColorRgb).
+	TerminalDataColorCursor TerminalData = C.GHOSTTY_TERMINAL_DATA_COLOR_CURSOR
+
+	// TerminalDataColorPalette is the current 256-color palette
+	// (GhosttyColorRgb[256]).
+	TerminalDataColorPalette TerminalData = C.GHOSTTY_TERMINAL_DATA_COLOR_PALETTE
+
+	// TerminalDataColorForegroundDefault is the default foreground color,
+	// ignoring OSC overrides (GhosttyColorRgb).
+	TerminalDataColorForegroundDefault TerminalData = C.GHOSTTY_TERMINAL_DATA_COLOR_FOREGROUND_DEFAULT
+
+	// TerminalDataColorBackgroundDefault is the default background color,
+	// ignoring OSC overrides (GhosttyColorRgb).
+	TerminalDataColorBackgroundDefault TerminalData = C.GHOSTTY_TERMINAL_DATA_COLOR_BACKGROUND_DEFAULT
+
+	// TerminalDataColorCursorDefault is the default cursor color,
+	// ignoring OSC overrides (GhosttyColorRgb).
+	TerminalDataColorCursorDefault TerminalData = C.GHOSTTY_TERMINAL_DATA_COLOR_CURSOR_DEFAULT
+
+	// TerminalDataColorPaletteDefault is the default 256-color palette,
+	// ignoring OSC overrides (GhosttyColorRgb[256]).
+	TerminalDataColorPaletteDefault TerminalData = C.GHOSTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT
+
+	// TerminalDataKittyImageStorageLimit is the Kitty image storage limit
+	// in bytes for the active screen (uint64_t).
+	TerminalDataKittyImageStorageLimit TerminalData = C.GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT
+
+	// TerminalDataKittyImageMediumFile indicates whether the file medium
+	// is enabled for Kitty image loading (bool).
+	TerminalDataKittyImageMediumFile TerminalData = C.GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE
+
+	// TerminalDataKittyImageMediumTempFile indicates whether the temporary
+	// file medium is enabled for Kitty image loading (bool).
+	TerminalDataKittyImageMediumTempFile TerminalData = C.GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE
+
+	// TerminalDataKittyImageMediumSharedMem indicates whether the shared
+	// memory medium is enabled for Kitty image loading (bool).
+	TerminalDataKittyImageMediumSharedMem TerminalData = C.GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM
+
+	// TerminalDataKittyGraphics is the Kitty graphics image storage for
+	// the active screen (GhosttyKittyGraphics).
+	TerminalDataKittyGraphics TerminalData = C.GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS
 )
 
 // ActiveScreen returns which screen buffer is currently active.
@@ -77,6 +201,44 @@ func (t *Terminal) ColorPalette() (*Palette, error) {
 // any OSC overrides.
 func (t *Terminal) ColorPaletteDefault() (*Palette, error) {
 	return t.getPalette(C.GHOSTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT)
+}
+
+// GetMulti queries multiple terminal data fields in a single cgo call.
+// This is a low-level function; prefer the typed getters (Cols, Rows,
+// CursorX, etc.) for normal use. GetMulti is useful when you need many
+// fields at once and want to avoid per-field cgo overhead.
+//
+// Each element in keys specifies a data kind, and the corresponding
+// element in values must be an unsafe.Pointer to a variable whose type
+// matches the "Output type" documented for that key in the upstream C
+// header (ghostty/vt/terminal.h, GhosttyTerminalData enum).
+//
+// Example:
+//
+//	var cols, rows C.uint16_t
+//	err := t.GetMulti(
+//		[]TerminalData{TerminalDataCols, TerminalDataRows},
+//		[]unsafe.Pointer{unsafe.Pointer(&cols), unsafe.Pointer(&rows)},
+//	)
+//
+// C: ghostty_terminal_get_multi
+func (t *Terminal) GetMulti(keys []TerminalData, values []unsafe.Pointer) error {
+	if len(keys) != len(values) {
+		return errors.New("libghostty: keys and values must have the same length")
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
+	cVals := cValuesArray(values)
+	defer C.free(unsafe.Pointer(cVals))
+	return resultError(C.ghostty_terminal_get_multi(
+		t.ptr,
+		C.size_t(len(keys)),
+		(*C.GhosttyTerminalData)(unsafe.Pointer(&keys[0])),
+		cVals,
+		nil,
+	))
 }
 
 // CursorPendingWrap reports whether the cursor has a pending wrap

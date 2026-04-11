@@ -4,6 +4,7 @@ package libghostty
 // GhosttyRenderStateRowCells C APIs.
 
 /*
+#include <stdlib.h>
 #include <ghostty/vt.h>
 */
 import "C"
@@ -11,6 +12,39 @@ import "C"
 import (
 	"errors"
 	"unsafe"
+)
+
+// RenderStateRowCellsData identifies a data field for render state cell
+// queries.
+// C: GhosttyRenderStateRowCellsData
+type RenderStateRowCellsData int
+
+const (
+	// RenderStateRowCellsDataInvalid is an invalid / sentinel value.
+	RenderStateRowCellsDataInvalid RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_INVALID
+
+	// RenderStateRowCellsDataRaw is the raw cell value (GhosttyCell).
+	RenderStateRowCellsDataRaw RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW
+
+	// RenderStateRowCellsDataStyle is the style for the current cell
+	// (GhosttyStyle).
+	RenderStateRowCellsDataStyle RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE
+
+	// RenderStateRowCellsDataGraphemesLen is the total number of grapheme
+	// codepoints including the base codepoint (uint32_t).
+	RenderStateRowCellsDataGraphemesLen RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN
+
+	// RenderStateRowCellsDataGraphemesBuf writes grapheme codepoints into
+	// a caller-provided buffer (uint32_t*).
+	RenderStateRowCellsDataGraphemesBuf RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF
+
+	// RenderStateRowCellsDataBgColor is the resolved background color of
+	// the cell (GhosttyColorRgb).
+	RenderStateRowCellsDataBgColor RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR
+
+	// RenderStateRowCellsDataFgColor is the resolved foreground color of
+	// the cell (GhosttyColorRgb).
+	RenderStateRowCellsDataFgColor RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR
 )
 
 // RenderStateRowCells iterates over cells in a render-state row.
@@ -54,6 +88,46 @@ func (rc *RenderStateRowCells) Next() bool {
 // so that subsequent reads return data for that cell.
 func (rc *RenderStateRowCells) Select(x uint16) error {
 	return resultError(C.ghostty_render_state_row_cells_select(rc.ptr, C.uint16_t(x)))
+}
+
+// GetMulti queries multiple render-state cell data fields in a single
+// cgo call. This is a low-level function; prefer the typed getters
+// (Raw, Style, Graphemes, BgColor, FgColor) for normal use. GetMulti
+// is useful when you need many fields at once and want to avoid
+// per-field cgo overhead.
+//
+// Each element in keys specifies a data kind, and the corresponding
+// element in values must be an unsafe.Pointer to a variable whose type
+// matches the "Output type" documented for that key in the upstream C
+// header (ghostty/vt/render.h, GhosttyRenderStateRowCellsData enum).
+//
+// Example:
+//
+//	var raw C.GhosttyCell
+//	var graphemesLen C.uint32_t
+//	err := rc.GetMulti(
+//		[]RenderStateRowCellsData{RenderStateRowCellsDataRaw, RenderStateRowCellsDataGraphemesLen},
+//		[]unsafe.Pointer{unsafe.Pointer(&raw), unsafe.Pointer(&graphemesLen)},
+//	)
+//
+// C: ghostty_render_state_row_cells_get_multi
+func (rc *RenderStateRowCells) GetMulti(keys []RenderStateRowCellsData, values []unsafe.Pointer) error {
+	if len(keys) != len(values) {
+		return errors.New("libghostty: keys and values must have the same length")
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
+	cVals := cValuesArray(values)
+	defer C.free(unsafe.Pointer(cVals))
+	return resultError(C.ghostty_render_state_row_cells_get_multi(
+		rc.ptr,
+		C.size_t(len(keys)),
+		(*C.GhosttyRenderStateRowCellsData)(unsafe.Pointer(&keys[0])),
+		cVals,
+		nil,
+	))
 }
 
 // Raw returns the raw Cell value for the current iterator position.

@@ -1,11 +1,103 @@
 package libghostty
 
 /*
+#include <stdlib.h>
 #include <ghostty/vt.h>
 */
 import "C"
 
-import "unsafe"
+import (
+	"errors"
+	"unsafe"
+)
+
+// CellData identifies a data field for cell queries.
+// C: GhosttyCellData
+type CellData int
+
+const (
+	// CellDataInvalid is an invalid data type.
+	CellDataInvalid CellData = C.GHOSTTY_CELL_DATA_INVALID
+
+	// CellDataCodepoint is the codepoint of the cell (uint32_t).
+	CellDataCodepoint CellData = C.GHOSTTY_CELL_DATA_CODEPOINT
+
+	// CellDataContentTag is the content tag describing what kind of
+	// content is in the cell (GhosttyCellContentTag).
+	CellDataContentTag CellData = C.GHOSTTY_CELL_DATA_CONTENT_TAG
+
+	// CellDataWide is the wide property of the cell (GhosttyCellWide).
+	CellDataWide CellData = C.GHOSTTY_CELL_DATA_WIDE
+
+	// CellDataHasText indicates whether the cell has text to render (bool).
+	CellDataHasText CellData = C.GHOSTTY_CELL_DATA_HAS_TEXT
+
+	// CellDataHasStyling indicates whether the cell has non-default
+	// styling (bool).
+	CellDataHasStyling CellData = C.GHOSTTY_CELL_DATA_HAS_STYLING
+
+	// CellDataStyleID is the style ID for the cell (uint16_t).
+	CellDataStyleID CellData = C.GHOSTTY_CELL_DATA_STYLE_ID
+
+	// CellDataHasHyperlink indicates whether the cell has a hyperlink
+	// (bool).
+	CellDataHasHyperlink CellData = C.GHOSTTY_CELL_DATA_HAS_HYPERLINK
+
+	// CellDataProtected indicates whether the cell is protected (bool).
+	CellDataProtected CellData = C.GHOSTTY_CELL_DATA_PROTECTED
+
+	// CellDataSemanticContent is the semantic content type of the cell
+	// (GhosttyCellSemanticContent).
+	CellDataSemanticContent CellData = C.GHOSTTY_CELL_DATA_SEMANTIC_CONTENT
+
+	// CellDataColorPalette is the palette index for the cell's background
+	// color (GhosttyColorPaletteIndex).
+	CellDataColorPalette CellData = C.GHOSTTY_CELL_DATA_COLOR_PALETTE
+
+	// CellDataColorRGBValue is the RGB value for the cell's background
+	// color (GhosttyColorRgb).
+	CellDataColorRGBValue CellData = C.GHOSTTY_CELL_DATA_COLOR_RGB
+)
+
+// RowData identifies a data field for row queries.
+// C: GhosttyRowData
+type RowData int
+
+const (
+	// RowDataInvalid is an invalid data type.
+	RowDataInvalid RowData = C.GHOSTTY_ROW_DATA_INVALID
+
+	// RowDataWrap indicates whether the row is soft-wrapped (bool).
+	RowDataWrap RowData = C.GHOSTTY_ROW_DATA_WRAP
+
+	// RowDataWrapContinuation indicates whether the row is a continuation
+	// of a soft-wrapped row (bool).
+	RowDataWrapContinuation RowData = C.GHOSTTY_ROW_DATA_WRAP_CONTINUATION
+
+	// RowDataGrapheme indicates whether any cells in the row have grapheme
+	// clusters (bool).
+	RowDataGrapheme RowData = C.GHOSTTY_ROW_DATA_GRAPHEME
+
+	// RowDataStyled indicates whether any cells in the row have styling
+	// (bool).
+	RowDataStyled RowData = C.GHOSTTY_ROW_DATA_STYLED
+
+	// RowDataHyperlink indicates whether any cells in the row have
+	// hyperlinks (bool).
+	RowDataHyperlink RowData = C.GHOSTTY_ROW_DATA_HYPERLINK
+
+	// RowDataSemanticPrompt is the semantic prompt state of the row
+	// (GhosttyRowSemanticPrompt).
+	RowDataSemanticPrompt RowData = C.GHOSTTY_ROW_DATA_SEMANTIC_PROMPT
+
+	// RowDataKittyVirtualPlaceholder indicates whether the row contains
+	// a Kitty virtual placeholder (bool).
+	RowDataKittyVirtualPlaceholder RowData = C.GHOSTTY_ROW_DATA_KITTY_VIRTUAL_PLACEHOLDER
+
+	// RowDataDirty indicates whether the row is dirty and requires a
+	// redraw (bool).
+	RowDataDirty RowData = C.GHOSTTY_ROW_DATA_DIRTY
+)
 
 // Cell is a wrapper around an opaque terminal grid cell value.
 // Use getter methods to extract data from it.
@@ -92,6 +184,45 @@ const (
 	// a continuation line.
 	RowSemanticPromptContinuation RowSemanticPrompt = C.GHOSTTY_ROW_SEMANTIC_PROMPT_CONTINUATION
 )
+
+// GetMulti queries multiple cell data fields in a single cgo call.
+// This is a low-level function; prefer the typed getters (Codepoint,
+// Wide, HasText, etc.) for normal use. GetMulti is useful when you
+// need many fields at once and want to avoid per-field cgo overhead.
+//
+// Each element in keys specifies a data kind, and the corresponding
+// element in values must be an unsafe.Pointer to a variable whose type
+// matches the "Output type" documented for that key in the upstream C
+// header (ghostty/vt/screen.h, GhosttyCellData enum).
+//
+// Example:
+//
+//	var cp C.uint32_t
+//	var wide C.GhosttyCellWide
+//	err := cell.GetMulti(
+//		[]CellData{CellDataCodepoint, CellDataWide},
+//		[]unsafe.Pointer{unsafe.Pointer(&cp), unsafe.Pointer(&wide)},
+//	)
+//
+// C: ghostty_cell_get_multi
+func (c *Cell) GetMulti(keys []CellData, values []unsafe.Pointer) error {
+	if len(keys) != len(values) {
+		return errors.New("libghostty: keys and values must have the same length")
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
+	cVals := cValuesArray(values)
+	defer C.free(unsafe.Pointer(cVals))
+	return resultError(C.ghostty_cell_get_multi(
+		c.c,
+		C.size_t(len(keys)),
+		(*C.GhosttyCellData)(unsafe.Pointer(&keys[0])),
+		cVals,
+		nil,
+	))
+}
 
 // Codepoint returns the codepoint of the cell (0 if empty).
 func (c *Cell) Codepoint() (uint32, error) {
@@ -193,6 +324,45 @@ func (c *Cell) ColorRGB() (ColorRGB, error) {
 		return ColorRGB{}, err
 	}
 	return ColorRGB{R: uint8(v.r), G: uint8(v.g), B: uint8(v.b)}, nil
+}
+
+// GetMulti queries multiple row data fields in a single cgo call.
+// This is a low-level function; prefer the typed getters (Wrap,
+// Grapheme, Styled, Semantic, etc.) for normal use. GetMulti is
+// useful when you need many fields at once and want to avoid
+// per-field cgo overhead.
+//
+// Each element in keys specifies a data kind, and the corresponding
+// element in values must be an unsafe.Pointer to a variable whose type
+// matches the "Output type" documented for that key in the upstream C
+// header (ghostty/vt/screen.h, GhosttyRowData enum).
+//
+// Example:
+//
+//	var wrap, styled C.bool
+//	err := row.GetMulti(
+//		[]RowData{RowDataWrap, RowDataStyled},
+//		[]unsafe.Pointer{unsafe.Pointer(&wrap), unsafe.Pointer(&styled)},
+//	)
+//
+// C: ghostty_row_get_multi
+func (r *Row) GetMulti(keys []RowData, values []unsafe.Pointer) error {
+	if len(keys) != len(values) {
+		return errors.New("libghostty: keys and values must have the same length")
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
+	cVals := cValuesArray(values)
+	defer C.free(unsafe.Pointer(cVals))
+	return resultError(C.ghostty_row_get_multi(
+		r.c,
+		C.size_t(len(keys)),
+		(*C.GhosttyRowData)(unsafe.Pointer(&keys[0])),
+		cVals,
+		nil,
+	))
 }
 
 // Wrap reports whether the row is soft-wrapped.
