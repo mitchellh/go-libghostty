@@ -3,7 +3,7 @@
 Go bindings for `libghostty-vt`.
 
 This project uses [cgo](https://pkg.go.dev/cmd/cgo) but `libghostty-vt`
-only depends on libc/libc++, so it is very easy to static link and very
+only depends on libc, so it is very easy to static link and very
 easy to cross-compile. The bindings default to static linking for this
 reason.
 

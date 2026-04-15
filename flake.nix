@@ -26,8 +26,6 @@
             pkgs.go
             pkgs.pinact
             zig.packages.${system}."0.15.2"
-          ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
-            pkgs.libcxx
           ];
 
           shellHook = ''
