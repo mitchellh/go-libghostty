@@ -239,7 +239,7 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 	C.ghostty_terminal_set(
 		t.ptr,
 		C.GHOSTTY_TERMINAL_OPT_USERDATA,
-		unsafe.Pointer(t.handle),
+		handleToPointer(t.handle),
 	)
 
 	// Register any effects that were provided via options.
@@ -407,4 +407,14 @@ func (t *Terminal) GridRef(point Point) (*GridRef, error) {
 		return nil, err
 	}
 	return &GridRef{ref: ref}, nil
+}
+
+// handleToPointer converts a cgo.Handle (uintptr) to unsafe.Pointer
+// for passing as C userdata. The handle is an opaque integer, not a
+// real Go pointer, so we suppress checkptr which would otherwise
+// reject it under -race.
+//
+//go:nocheckptr
+func handleToPointer(h cgo.Handle) unsafe.Pointer {
+	return unsafe.Pointer(h)
 }
