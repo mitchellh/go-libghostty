@@ -12,7 +12,8 @@ import "unsafe"
 
 // KeyEvent is an opaque handle representing a keyboard input event
 // containing information about the physical key pressed, modifiers,
-// and generated text.
+// and generated text. It is mutable and reusable, but not safe for
+// concurrent use.
 //
 // C: GhosttyKeyEvent
 type KeyEvent struct {

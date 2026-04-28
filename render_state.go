@@ -13,6 +13,16 @@ import "C"
 // for repeated updates from a single terminal, only updating dirty
 // regions of the screen.
 //
+// A render state owns its own snapshot storage. Hold exclusive access
+// to the terminal while calling [RenderState.Update]. After Update
+// returns, the render state can be read without touching the terminal
+// until the next Update. Do not call Update concurrently with reads
+// from the same render state.
+//
+// Iterators populated from the render state are only valid until the
+// next Update, but copied values returned from their getter methods can
+// be retained.
+//
 // Basic usage:
 //  1. Create an empty render state with NewRenderState.
 //  2. Update it from a terminal via Update whenever needed.
@@ -96,8 +106,10 @@ func (rs *RenderState) Close() {
 }
 
 // Update updates the render state from a terminal instance. This
-// consumes terminal/screen dirty state. The terminal must not be
-// used concurrently during this call.
+// consumes terminal/screen dirty state and is the only render-state
+// operation that touches the terminal. Hold exclusive access to the
+// terminal while this call is running, and do not read from the same
+// render state concurrently with Update.
 func (rs *RenderState) Update(t *Terminal) error {
 	return resultError(C.ghostty_render_state_update(rs.ptr, t.ptr))
 }

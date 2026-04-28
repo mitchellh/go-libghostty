@@ -11,6 +11,13 @@ import (
 )
 
 // Terminal wraps a Ghostty VT terminal handle.
+// It is stateful, not safe for concurrent use, and not reentrant.
+// Serialize all calls that touch a terminal, including getters,
+// setters, [Terminal.VTWrite], [Terminal.Resize], [Terminal.Close],
+// and any borrowed handles derived from it. Effect callbacks run
+// synchronously during [Terminal.VTWrite]; they must not call
+// [Terminal.VTWrite] on the same terminal and should avoid blocking
+// for long periods.
 // C: GhosttyTerminal
 type Terminal struct {
 	ptr C.GhosttyTerminal
@@ -281,7 +288,9 @@ func (t *Terminal) Resize(cols, rows uint16, cellWidthPx, cellHeightPx uint32) e
 
 // VTWrite feeds raw VT-encoded bytes through the terminal's parser,
 // updating terminal state. Malformed input is handled gracefully and
-// will not cause an error.
+// will not cause an error. Effect callbacks run synchronously before
+// this call returns; they must not call [Terminal.VTWrite] on the same
+// terminal.
 func (t *Terminal) VTWrite(data []byte) {
 	if len(data) == 0 {
 		return
@@ -376,9 +385,10 @@ type Scrollbar struct {
 }
 
 // KittyGraphics returns the Kitty graphics image storage for the
-// terminal's active screen. The returned handle is borrowed from
-// the terminal and remains valid until the next mutating call
-// (e.g. VTWrite or Reset).
+// terminal's active screen. The returned handle is borrowed from the
+// terminal and remains valid until the next mutating call (for example
+// [Terminal.VTWrite] or [Terminal.Reset]). Serialize use of the
+// returned handle with mutations of the terminal.
 func (t *Terminal) KittyGraphics() (*KittyGraphics, error) {
 	var ptr C.GhosttyKittyGraphics
 	if err := resultError(C.ghostty_terminal_get(
@@ -392,7 +402,8 @@ func (t *Terminal) KittyGraphics() (*KittyGraphics, error) {
 }
 
 // GridRef resolves a point in the terminal grid to a grid reference.
-// The returned GridRef is only valid until the next terminal update.
+// The returned GridRef is borrowed from terminal internals and should
+// be used immediately; any later terminal operation may invalidate it.
 //
 // Lookups using PointTagActive and PointTagViewport are fast.
 // PointTagScreen and PointTagHistory may be expensive for large

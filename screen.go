@@ -99,14 +99,18 @@ const (
 )
 
 // Cell is a wrapper around an opaque terminal grid cell value.
-// Use getter methods to extract data from it.
+// Use getter methods to extract data from it. A Cell is a copied value
+// snapshot, not a borrowed handle, so it may be retained after the
+// [GridRef] or render-state iterator that produced it becomes invalid.
 // C: GhosttyCell
 type Cell struct {
 	c C.GhosttyCell
 }
 
 // Row is a wrapper around an opaque terminal grid row value.
-// Use getter methods to extract data from it.
+// Use getter methods to extract data from it. A Row is a copied value
+// snapshot, not a borrowed handle, so it may be retained after the
+// [GridRef] or render-state iterator that produced it becomes invalid.
 // C: GhosttyRow
 type Row struct {
 	c C.GhosttyRow

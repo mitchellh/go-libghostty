@@ -60,9 +60,11 @@ const (
 	UnderlineDashed = C.GHOSTTY_SGR_UNDERLINE_DASHED
 )
 
-// Style is a thin wrapper around the C GhosttyStyle. It provides
-// getter methods to access individual style attributes without
-// copying the entire struct upfront.
+// Style is a thin wrapper around the copied C GhosttyStyle value. It
+// provides getter methods to access individual style attributes
+// without copying the entire struct upfront. A Style is a value
+// snapshot and may be retained after the terminal, [GridRef], or
+// render-state iterator that produced it becomes invalid.
 // C: GhosttyStyle
 type Style struct {
 	c C.GhosttyStyle

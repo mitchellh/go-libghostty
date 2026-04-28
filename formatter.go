@@ -161,7 +161,9 @@ func WithFormatterExtraCharsets(v bool) FormatterOption {
 
 // Formatter wraps a Ghostty formatter handle that can produce
 // plain text, VT sequences, or HTML from a terminal's current state.
-// The terminal must outlive the formatter.
+// The formatter stores a borrowed reference to a terminal, so the
+// terminal must outlive the formatter and formatter calls must be
+// serialized with all other access to that terminal.
 //
 // Formatter implements io.WriterTo so formatted output can be written
 // directly to any io.Writer.
@@ -173,7 +175,8 @@ type Formatter struct {
 // NewFormatter creates a formatter for the given terminal's active screen.
 // The terminal must outlive the formatter. The formatter captures a
 // borrowed reference to the terminal and reads its current state on
-// each Format call.
+// each [Formatter.Format] call, so formatter calls must be serialized
+// with other access to the terminal.
 func NewFormatter(t *Terminal, opts ...FormatterOption) (*Formatter, error) {
 	// Start with GHOSTTY_INIT_SIZED defaults; options only touch
 	// fields the caller explicitly sets.
@@ -197,8 +200,10 @@ func (f *Formatter) Close() {
 }
 
 // Format runs the formatter and returns the output as a byte slice.
-// Each call reflects the terminal's current state at the time of the call.
-// The returned buffer is allocated by libghostty and copied into Go memory.
+// Each call reflects the terminal's current state at the time of the
+// call. Serialize Format with all other access to the underlying
+// terminal. The returned buffer is allocated by libghostty and copied
+// into Go memory.
 func (f *Formatter) Format() ([]byte, error) {
 	var outPtr *C.uint8_t
 	var outLen C.size_t

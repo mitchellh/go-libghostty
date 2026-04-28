@@ -122,9 +122,10 @@ const (
 )
 
 // KittyGraphics is a handle to the Kitty graphics image storage
-// associated with a terminal's active screen. It is borrowed from
-// the terminal and remains valid until the next mutating terminal
-// call (e.g. VTWrite or Reset).
+// associated with a terminal's active screen. It is borrowed from the
+// terminal and remains valid until the next mutating terminal call
+// (for example [Terminal.VTWrite] or [Terminal.Reset]). Access to this
+// handle must be serialized with mutations of the owning terminal.
 //
 // C: GhosttyKittyGraphics
 type KittyGraphics struct {
@@ -133,7 +134,9 @@ type KittyGraphics struct {
 
 // KittyGraphicsImage is a handle to a single Kitty graphics image.
 // It is borrowed from the storage and remains valid until the next
-// mutating terminal call.
+// mutating terminal call. Access to this handle and any borrowed pixel
+// data derived from it must be serialized with mutations of the owning
+// terminal.
 //
 // C: GhosttyKittyGraphicsImage
 type KittyGraphicsImage struct {
@@ -143,7 +146,9 @@ type KittyGraphicsImage struct {
 // KittyGraphicsPlacementIterator iterates over placements in the
 // Kitty graphics storage. It is independently owned and must be
 // freed by calling Close, but the data it yields is only valid
-// while the underlying terminal is not mutated.
+// while the underlying terminal is not mutated. Access to the iterator
+// must therefore be serialized with mutations of the terminal that
+// produced it.
 //
 // C: GhosttyKittyGraphicsPlacementIterator
 type KittyGraphicsPlacementIterator struct {
@@ -207,7 +212,10 @@ const (
 	KittyImageCompressionZlibDeflate KittyImageCompression = C.GHOSTTY_KITTY_IMAGE_COMPRESSION_ZLIB_DEFLATE
 )
 
-// Selection represents a grid selection range defined by two grid references.
+// Selection represents a grid selection range defined by two grid
+// references. Because Start and End are [GridRef] values, a Selection
+// returned by Kitty graphics helpers is also a borrowed view and is
+// invalidated by the next mutation of the owning terminal.
 //
 // C: GhosttySelection
 type Selection struct {

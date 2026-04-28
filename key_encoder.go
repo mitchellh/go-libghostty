@@ -12,6 +12,8 @@ import "unsafe"
 
 // KeyEncoder encodes key events into terminal escape sequences,
 // supporting both legacy encoding and the Kitty Keyboard Protocol.
+// It maintains mutable encoding options and is not safe for concurrent
+// use.
 //
 // Basic usage:
 //  1. Create an encoder with NewKeyEncoder.
@@ -156,7 +158,8 @@ func (enc *KeyEncoder) SetOptOptionAsAlt(val OptionAsAlt) {
 //
 // Note that the macOS option-as-alt option cannot be determined from
 // terminal state and is reset to OptionAsAltFalse by this call. Use
-// SetOptOptionAsAlt afterward if needed.
+// SetOptOptionAsAlt afterward if needed. The caller must serialize
+// access to both the encoder and the terminal during this call.
 func (enc *KeyEncoder) SetOptFromTerminal(t *Terminal) {
 	C.ghostty_key_encoder_setopt_from_terminal(enc.ptr, t.ptr)
 }

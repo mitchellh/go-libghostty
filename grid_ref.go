@@ -22,10 +22,15 @@ func initCGridRef() C.GhosttyGridRef {
 
 // GridRef is a resolved reference to a specific cell position in the
 // terminal's internal page structure. Obtain a GridRef from
-// Terminal.GridRef, then extract cell or row data from it.
+// [Terminal.GridRef], then extract cell or row data from it.
 //
-// A GridRef is only valid until the next update to the terminal
-// instance. Read and cache any needed information immediately.
+// A GridRef is a borrowed view into terminal internals, so callers
+// must use it under the same serialized access that protects the
+// owning terminal. Any later terminal operation may invalidate the
+// GridRef, even if it looks unrelated, so read and cache what you
+// need immediately. Values returned by its getter methods are copied
+// snapshots and may be retained after the GridRef itself becomes
+// invalid.
 // C: GhosttyGridRef
 type GridRef struct {
 	ref C.GhosttyGridRef

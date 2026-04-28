@@ -10,7 +10,8 @@ import "C"
 
 // MouseEvent is an opaque handle representing a normalized mouse
 // input event containing action, button, modifiers, and surface-space
-// position.
+// position. It is mutable and reusable, but not safe for concurrent
+// use.
 //
 // C: GhosttyMouseEvent
 type MouseEvent struct {

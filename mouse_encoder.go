@@ -19,6 +19,8 @@ import "unsafe"
 
 // MouseEncoder encodes mouse events into terminal escape sequences,
 // supporting X10, UTF-8, SGR, URxvt, and SGR-Pixels mouse protocols.
+// It maintains mutable encoder state and is not safe for concurrent
+// use.
 //
 // Basic usage:
 //  1. Create an encoder with NewMouseEncoder.
@@ -182,7 +184,8 @@ func (enc *MouseEncoder) SetOptTrackLastCell(track bool) {
 
 // SetOptFromTerminal reads the terminal's current mouse tracking mode
 // and output format and applies them to the encoder. It does not
-// modify size or any-button state.
+// modify size or any-button state. The caller must serialize access to
+// both the encoder and the terminal during this call.
 func (enc *MouseEncoder) SetOptFromTerminal(t *Terminal) {
 	C.ghostty_mouse_encoder_setopt_from_terminal(enc.ptr, t.ptr)
 }

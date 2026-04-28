@@ -35,12 +35,14 @@ const (
 
 // RenderStateRowIterator iterates over rows in a render state.
 // Create one with NewRenderStateRowIterator, populate it via
-// RenderState.RowIterator, then advance with Next and read data
-// with getter methods.
+// [RenderState.RowIterator], then advance with [RenderStateRowIterator.Next]
+// and read data with getter methods.
 //
-// Row data is only valid as long as the underlying render state
-// is not updated. It is unsafe to use row data after calling
-// RenderState.Update.
+// The iterator's current position is only valid as long as the
+// underlying render state is not updated. Do not use the iterator
+// while [RenderState.Update] may run on the same render state.
+// Extracted [Row] values are copied snapshots and may be retained after
+// the iterator itself becomes invalid.
 //
 // C: GhosttyRenderStateRowIterator
 type RenderStateRowIterator struct {
