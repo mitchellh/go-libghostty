@@ -48,12 +48,15 @@ const (
 
 // RenderStateRowCells iterates over cells in a render-state row.
 // Create one with NewRenderStateRowCells, populate it via
-// RenderStateRowIterator.Cells, then advance with Next (or jump
-// with Select) and read data with getter methods.
+// [RenderStateRowIterator.Cells], then advance with
+// [RenderStateRowCells.Next] (or jump with [RenderStateRowCells.Select])
+// and read data with getter methods.
 //
 // A single instance can be reused across rows to avoid repeated
-// allocation. Cell data is only valid until the next call to
-// RenderState.Update.
+// allocation. The cells view is only valid until the next call to
+// [RenderState.Update]. Do not use it while [RenderState.Update] may
+// run on the same render state. Extracted [Cell], [Style], color
+// values, and grapheme slices are copied values and may be retained.
 //
 // C: GhosttyRenderStateRowCells
 type RenderStateRowCells struct {

@@ -313,8 +313,8 @@ func (rs *RenderState) Dirty() (RenderStateDirty, error) {
 // from the render state. The iterator can then be advanced with Next
 // and queried with getter methods.
 //
-// The iterator can be reused across multiple calls. Row data is only
-// valid until the next call to Update.
+// The iterator can be reused across multiple calls. The iterator view
+// is only valid until the next call to [RenderState.Update].
 func (rs *RenderState) RowIterator(ri *RenderStateRowIterator) error {
 	return resultError(C.ghostty_render_state_get(
 		rs.ptr,

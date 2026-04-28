@@ -20,12 +20,39 @@
 //
 //	term.VTWrite([]byte("Hello, world!\r\n"))
 //
+// # Concurrency
+//
+// Unless documented otherwise, exported handle types in this package are
+// not safe for concurrent use. Keep each [Terminal], [Formatter],
+// [KeyEncoder], [MouseEncoder], [KeyEvent], [MouseEvent], and borrowed
+// view confined to one goroutine at a time or protect it with your own
+// synchronization.
+//
+// [RenderState] is the main exception. Hold exclusive access to the
+// terminal while calling [RenderState.Update]. After Update returns, the
+// render state can be read without touching the terminal until the next
+// Update. Do not call Update concurrently with reads from the same
+// render state.
+//
+// Borrowed views such as [GridRef], [KittyGraphics], [KittyGraphicsImage],
+// and [Selection], plus raw pixel slices returned by Kitty graphics
+// accessors, are only valid until the next mutating terminal call. Read
+// and copy what you need before mutating the terminal again.
+//
+// Plain copied values such as [Cell], [Row], [Style], [ColorRGB], and
+// [Palette] are regular Go values and may be retained after the call
+// that produced them.
+//
 // # Effects
 //
 // The terminal communicates side-effects back to the host through
 // effect callbacks. Register them at creation time with functional
 // options like [WithWritePty], [WithBell], and [WithEnquiry], or
 // on a live terminal with [Terminal.SetEffectWritePty] and friends.
+//
+// Effect callbacks run synchronously during [Terminal.VTWrite]. They
+// must not call [Terminal.VTWrite] on the same terminal and should avoid
+// blocking for long periods.
 //
 // [WithWritePty] is the most common effect — it delivers data that
 // the terminal wants to send back to the pty (e.g. query responses):
