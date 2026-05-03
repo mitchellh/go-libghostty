@@ -8,6 +8,8 @@ package libghostty
 */
 import "C"
 
+import "fmt"
+
 // MouseEvent is an opaque handle representing a normalized mouse
 // input event containing action, button, modifiers, and surface-space
 // position. It is mutable and reusable, but not safe for concurrent
@@ -54,6 +56,63 @@ const (
 	MouseButtonTen     MouseButton = C.GHOSTTY_MOUSE_BUTTON_TEN
 	MouseButtonEleven  MouseButton = C.GHOSTTY_MOUSE_BUTTON_ELEVEN
 )
+
+// mouseButtonNames is the canonical mapping between MouseButton
+// values and their snake_case string names. Used as the source of
+// truth for both String and FromString.
+var mouseButtonNames = []struct {
+	button MouseButton
+	name   string
+}{
+	{MouseButtonUnknown, "unknown"},
+	{MouseButtonLeft, "left"},
+	{MouseButtonRight, "right"},
+	{MouseButtonMiddle, "middle"},
+	{MouseButtonFour, "four"},
+	{MouseButtonFive, "five"},
+	{MouseButtonSix, "six"},
+	{MouseButtonSeven, "seven"},
+	{MouseButtonEight, "eight"},
+	{MouseButtonNine, "nine"},
+	{MouseButtonTen, "ten"},
+	{MouseButtonEleven, "eleven"},
+}
+
+// String returns the canonical lowercase name of the mouse button
+// (e.g. "left", "right", "four"). Unknown values render as
+// "unknown".
+func (b MouseButton) String() string {
+	for _, e := range mouseButtonNames {
+		if e.button == b {
+			return e.name
+		}
+	}
+	return "unknown"
+}
+
+// FromString parses a canonical mouse button name and stores the
+// corresponding MouseButton value in the receiver. Returns an error
+// if the name is not recognized.
+func (b *MouseButton) FromString(s string) error {
+	for _, e := range mouseButtonNames {
+		if e.name == s {
+			*b = e.button
+			return nil
+		}
+	}
+	return fmt.Errorf("libghostty: unknown mouse button %q", s)
+}
+
+// NewMouseButtonFromString returns the MouseButton value for the
+// given canonical name (e.g. "left", "right", "four"). Returns an
+// error if the name is not recognized.
+func NewMouseButtonFromString(s string) (MouseButton, error) {
+	var b MouseButton
+	if err := b.FromString(s); err != nil {
+		return MouseButtonUnknown, err
+	}
+	return b, nil
+}
 
 // MousePosition represents a mouse position in surface-space pixels.
 //
