@@ -1,8 +1,13 @@
 package libghostty
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
-// Tests for String / FromString conversions across enum types.
+// Tests for String, MarshalText, UnmarshalText, and Parse* helpers
+// across enum types. The compile-time interface assertions live
+// alongside each type's implementation.
 
 func TestKeyString(t *testing.T) {
 	cases := []struct {
@@ -25,15 +30,15 @@ func TestKeyString(t *testing.T) {
 	}
 }
 
-func TestKeyFromString(t *testing.T) {
+func TestKeyUnmarshalText(t *testing.T) {
 	var k Key
-	if err := k.FromString("arrow_left"); err != nil {
+	if err := k.UnmarshalText([]byte("arrow_left")); err != nil {
 		t.Fatal(err)
 	}
 	if k != KeyArrowLeft {
 		t.Fatalf("expected KeyArrowLeft, got %d", k)
 	}
-	if err := k.FromString("not_a_real_key"); err == nil {
+	if err := k.UnmarshalText([]byte("not_a_real_key")); err == nil {
 		t.Fatal("expected error for unknown key name")
 	}
 }
@@ -41,15 +46,42 @@ func TestKeyFromString(t *testing.T) {
 func TestKeyRoundtrip(t *testing.T) {
 	for _, e := range keyNames {
 		var k Key
-		if err := k.FromString(e.name); err != nil {
-			t.Fatalf("FromString(%q) failed: %v", e.name, err)
+		if err := k.UnmarshalText([]byte(e.name)); err != nil {
+			t.Fatalf("UnmarshalText(%q) failed: %v", e.name, err)
 		}
 		if k != e.key {
-			t.Fatalf("FromString(%q) = %d, want %d", e.name, k, e.key)
+			t.Fatalf("UnmarshalText(%q) = %d, want %d", e.name, k, e.key)
 		}
-		if got := k.String(); got != e.name {
-			t.Fatalf("String() roundtrip mismatch: %q -> %q", e.name, got)
+		got, err := k.MarshalText()
+		if err != nil {
+			t.Fatalf("MarshalText failed: %v", err)
 		}
+		if string(got) != e.name {
+			t.Fatalf("MarshalText roundtrip mismatch: %q -> %q", e.name, string(got))
+		}
+	}
+}
+
+func TestKeyJSON(t *testing.T) {
+	// Round-trip through encoding/json to confirm TextMarshaler
+	// integration.
+	type wrap struct {
+		K Key `json:"k"`
+	}
+	in := wrap{K: KeyArrowUp}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != `{"k":"arrow_up"}` {
+		t.Fatalf("json.Marshal = %s, want %s", data, `{"k":"arrow_up"}`)
+	}
+	var out wrap
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.K != KeyArrowUp {
+		t.Fatalf("json.Unmarshal = %d, want %d", out.K, KeyArrowUp)
 	}
 }
 
@@ -72,7 +104,17 @@ func TestModsString(t *testing.T) {
 	}
 }
 
-func TestModsFromString(t *testing.T) {
+func TestModsMarshalEmpty(t *testing.T) {
+	got, err := Mods(0).MarshalText()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "" {
+		t.Fatalf("Mods(0).MarshalText() = %q, want empty", string(got))
+	}
+}
+
+func TestModsUnmarshalText(t *testing.T) {
 	cases := []struct {
 		in   string
 		want Mods
@@ -90,16 +132,16 @@ func TestModsFromString(t *testing.T) {
 	}
 	for _, c := range cases {
 		var m Mods
-		if err := m.FromString(c.in); err != nil {
-			t.Fatalf("FromString(%q) failed: %v", c.in, err)
+		if err := m.UnmarshalText([]byte(c.in)); err != nil {
+			t.Fatalf("UnmarshalText(%q) failed: %v", c.in, err)
 		}
 		if m != c.want {
-			t.Errorf("FromString(%q) = %d, want %d", c.in, m, c.want)
+			t.Errorf("UnmarshalText(%q) = %d, want %d", c.in, m, c.want)
 		}
 	}
 
 	var m Mods
-	if err := m.FromString("nope"); err == nil {
+	if err := m.UnmarshalText([]byte("nope")); err == nil {
 		t.Fatal("expected error for unknown modifier")
 	}
 }
@@ -107,12 +149,16 @@ func TestModsFromString(t *testing.T) {
 func TestModsRoundtrip(t *testing.T) {
 	all := ModShift | ModCtrl | ModAlt | ModSuper | ModCapsLock |
 		ModNumLock | ModShiftSide | ModCtrlSide | ModAltSide | ModSuperSide
+	text, err := all.MarshalText()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var m Mods
-	if err := m.FromString(all.String()); err != nil {
+	if err := m.UnmarshalText(text); err != nil {
 		t.Fatal(err)
 	}
 	if m != all {
-		t.Fatalf("roundtrip failed: %d -> %q -> %d", all, all.String(), m)
+		t.Fatalf("roundtrip failed: %d -> %q -> %d", all, string(text), m)
 	}
 }
 
@@ -135,19 +181,19 @@ func TestMouseButtonString(t *testing.T) {
 	}
 }
 
-func TestMouseButtonFromString(t *testing.T) {
+func TestMouseButtonUnmarshalText(t *testing.T) {
 	for _, e := range mouseButtonNames {
 		var b MouseButton
-		if err := b.FromString(e.name); err != nil {
-			t.Fatalf("FromString(%q) failed: %v", e.name, err)
+		if err := b.UnmarshalText([]byte(e.name)); err != nil {
+			t.Fatalf("UnmarshalText(%q) failed: %v", e.name, err)
 		}
 		if b != e.button {
-			t.Fatalf("FromString(%q) = %d, want %d", e.name, b, e.button)
+			t.Fatalf("UnmarshalText(%q) = %d, want %d", e.name, b, e.button)
 		}
 	}
 
 	var b MouseButton
-	if err := b.FromString("nope"); err == nil {
+	if err := b.UnmarshalText([]byte("nope")); err == nil {
 		t.Fatal("expected error for unknown mouse button")
 	}
 }
@@ -161,45 +207,45 @@ func TestFocusEventString(t *testing.T) {
 	}
 }
 
-func TestFocusEventFromString(t *testing.T) {
+func TestFocusEventUnmarshalText(t *testing.T) {
 	var f FocusEvent
-	if err := f.FromString("gained"); err != nil || f != FocusGained {
-		t.Fatalf("FromString(gained) = %d, %v", f, err)
+	if err := f.UnmarshalText([]byte("gained")); err != nil || f != FocusGained {
+		t.Fatalf("UnmarshalText(gained) = %d, %v", f, err)
 	}
-	if err := f.FromString("lost"); err != nil || f != FocusLost {
-		t.Fatalf("FromString(lost) = %d, %v", f, err)
+	if err := f.UnmarshalText([]byte("lost")); err != nil || f != FocusLost {
+		t.Fatalf("UnmarshalText(lost) = %d, %v", f, err)
 	}
-	if err := f.FromString("nope"); err == nil {
+	if err := f.UnmarshalText([]byte("nope")); err == nil {
 		t.Fatal("expected error for unknown focus event")
 	}
 }
 
-func TestNewFromStringConstructors(t *testing.T) {
-	if k, err := NewKeyFromString("arrow_up"); err != nil || k != KeyArrowUp {
-		t.Fatalf("NewKeyFromString(arrow_up) = %d, %v", k, err)
+func TestParseHelpers(t *testing.T) {
+	if k, err := ParseKey("arrow_up"); err != nil || k != KeyArrowUp {
+		t.Fatalf("ParseKey(arrow_up) = %d, %v", k, err)
 	}
-	if _, err := NewKeyFromString("nope"); err == nil {
-		t.Fatal("expected error from NewKeyFromString")
-	}
-
-	if m, err := NewModsFromString("shift+ctrl"); err != nil || m != ModShift|ModCtrl {
-		t.Fatalf("NewModsFromString = %d, %v", m, err)
-	}
-	if _, err := NewModsFromString("nope"); err == nil {
-		t.Fatal("expected error from NewModsFromString")
+	if _, err := ParseKey("nope"); err == nil {
+		t.Fatal("expected error from ParseKey")
 	}
 
-	if b, err := NewMouseButtonFromString("middle"); err != nil || b != MouseButtonMiddle {
-		t.Fatalf("NewMouseButtonFromString = %d, %v", b, err)
+	if m, err := ParseMods("shift+ctrl"); err != nil || m != ModShift|ModCtrl {
+		t.Fatalf("ParseMods = %d, %v", m, err)
 	}
-	if _, err := NewMouseButtonFromString("nope"); err == nil {
-		t.Fatal("expected error from NewMouseButtonFromString")
+	if _, err := ParseMods("nope"); err == nil {
+		t.Fatal("expected error from ParseMods")
 	}
 
-	if f, err := NewFocusEventFromString("gained"); err != nil || f != FocusGained {
-		t.Fatalf("NewFocusEventFromString = %d, %v", f, err)
+	if b, err := ParseMouseButton("middle"); err != nil || b != MouseButtonMiddle {
+		t.Fatalf("ParseMouseButton = %d, %v", b, err)
 	}
-	if _, err := NewFocusEventFromString("nope"); err == nil {
-		t.Fatal("expected error from NewFocusEventFromString")
+	if _, err := ParseMouseButton("nope"); err == nil {
+		t.Fatal("expected error from ParseMouseButton")
+	}
+
+	if f, err := ParseFocusEvent("gained"); err != nil || f != FocusGained {
+		t.Fatalf("ParseFocusEvent = %d, %v", f, err)
+	}
+	if _, err := ParseFocusEvent("nope"); err == nil {
+		t.Fatal("expected error from ParseFocusEvent")
 	}
 }

@@ -1,8 +1,16 @@
 package libghostty
 
 import (
+	"encoding"
 	"fmt"
 	"strings"
+)
+
+// Compile-time assertions that Mods implements the standard text
+// marshaling interfaces.
+var (
+	_ encoding.TextMarshaler   = Mods(0)
+	_ encoding.TextUnmarshaler = (*Mods)(nil)
 )
 
 // Human-friendly string conversion for Mods bitmasks. Each set bit
@@ -64,19 +72,29 @@ func (m Mods) String() string {
 	return strings.Join(parts, "+")
 }
 
-// FromString parses a "+" or "," separated list of modifier names
-// and stores the resulting bitmask in the receiver. Whitespace
-// around tokens and empty tokens are ignored. Recognized names are
-// the canonical snake_case names returned by String plus the
-// upstream aliases (cmd/command, opt/option, control). Returns an
-// error if any token is not recognized.
+// MarshalText implements encoding.TextMarshaler. The output is the
+// same as String() so the type integrates with encoding/json and
+// other text-based encoders. An empty bitmask marshals to an empty
+// byte slice (i.e. JSON `""`).
+func (m Mods) MarshalText() ([]byte, error) {
+	return []byte(m.String()), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler. It parses a
+// "+" or "," separated list of modifier names and stores the
+// resulting bitmask in the receiver. Whitespace around tokens and
+// empty tokens are ignored. Recognized names are the canonical
+// snake_case names returned by String plus the upstream aliases
+// (cmd/command, opt/option, control). An empty input is valid and
+// produces a zero bitmask. Returns an error if any token is not
+// recognized.
 //
 // The receiver is overwritten, not OR'd into.
-func (m *Mods) FromString(s string) error {
+func (m *Mods) UnmarshalText(text []byte) error {
 	var out Mods
-	if s != "" {
+	if len(text) > 0 {
 		// Normalize "," separators to "+" so we can split once.
-		s = strings.ReplaceAll(s, ",", "+")
+		s := strings.ReplaceAll(string(text), ",", "+")
 		for _, raw := range strings.Split(s, "+") {
 			tok := strings.TrimSpace(raw)
 			if tok == "" {
@@ -103,12 +121,12 @@ func (m *Mods) FromString(s string) error {
 	return nil
 }
 
-// NewModsFromString returns the Mods value parsed from the given
-// "+" or "," separated list of modifier names. See Mods.FromString
-// for the accepted syntax and aliases.
-func NewModsFromString(s string) (Mods, error) {
+// ParseMods returns the Mods value parsed from the given "+" or ","
+// separated list of modifier names. See Mods.UnmarshalText for the
+// accepted syntax and aliases.
+func ParseMods(s string) (Mods, error) {
 	var m Mods
-	if err := m.FromString(s); err != nil {
+	if err := m.UnmarshalText([]byte(s)); err != nil {
 		return 0, err
 	}
 	return m, nil

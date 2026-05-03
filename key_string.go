@@ -1,6 +1,16 @@
 package libghostty
 
-import "fmt"
+import (
+	"encoding"
+	"fmt"
+)
+
+// Compile-time assertions that Key implements the standard text
+// marshaling interfaces.
+var (
+	_ encoding.TextMarshaler   = Key(0)
+	_ encoding.TextUnmarshaler = (*Key)(nil)
+)
 
 // Human-friendly string conversion for Key values. The names use
 // snake_case and match the canonical names used by upstream
@@ -236,23 +246,31 @@ func (k Key) String() string {
 	return keyToName[KeyUnidentified]
 }
 
-// FromString parses a canonical snake_case key name and stores the
-// corresponding Key value in the receiver. Returns an error if the
-// name is not recognized.
-func (k *Key) FromString(s string) error {
-	if v, ok := nameToKey[s]; ok {
+// MarshalText implements encoding.TextMarshaler. The output is the
+// same as String() so the type integrates with encoding/json and
+// other text-based encoders.
+func (k Key) MarshalText() ([]byte, error) {
+	return []byte(k.String()), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler. It parses a
+// canonical snake_case key name (e.g. "key_a", "arrow_down") and
+// stores the corresponding Key value in the receiver. Returns an
+// error if the name is not recognized.
+func (k *Key) UnmarshalText(text []byte) error {
+	if v, ok := nameToKey[string(text)]; ok {
 		*k = v
 		return nil
 	}
-	return fmt.Errorf("libghostty: unknown key name %q", s)
+	return fmt.Errorf("libghostty: unknown key name %q", string(text))
 }
 
-// NewKeyFromString returns the Key value for the given canonical
-// snake_case key name (e.g. "key_a", "arrow_down"). Returns an
-// error if the name is not recognized.
-func NewKeyFromString(s string) (Key, error) {
+// ParseKey returns the Key value for the given canonical snake_case
+// key name (e.g. "key_a", "arrow_down"). Returns an error if the
+// name is not recognized.
+func ParseKey(s string) (Key, error) {
 	var k Key
-	if err := k.FromString(s); err != nil {
+	if err := k.UnmarshalText([]byte(s)); err != nil {
 		return 0, err
 	}
 	return k, nil

@@ -8,7 +8,17 @@ package libghostty
 */
 import "C"
 
-import "fmt"
+import (
+	"encoding"
+	"fmt"
+)
+
+// Compile-time assertions that MouseButton implements the standard
+// text marshaling interfaces.
+var (
+	_ encoding.TextMarshaler   = MouseButton(0)
+	_ encoding.TextUnmarshaler = (*MouseButton)(nil)
+)
 
 // MouseEvent is an opaque handle representing a normalized mouse
 // input event containing action, button, modifiers, and surface-space
@@ -90,10 +100,19 @@ func (b MouseButton) String() string {
 	return "unknown"
 }
 
-// FromString parses a canonical mouse button name and stores the
-// corresponding MouseButton value in the receiver. Returns an error
-// if the name is not recognized.
-func (b *MouseButton) FromString(s string) error {
+// MarshalText implements encoding.TextMarshaler. The output is the
+// same as String() so the type integrates with encoding/json and
+// other text-based encoders.
+func (b MouseButton) MarshalText() ([]byte, error) {
+	return []byte(b.String()), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler. It parses a
+// canonical mouse button name (e.g. "left", "right", "four") and
+// stores the corresponding MouseButton value in the receiver.
+// Returns an error if the name is not recognized.
+func (b *MouseButton) UnmarshalText(text []byte) error {
+	s := string(text)
 	for _, e := range mouseButtonNames {
 		if e.name == s {
 			*b = e.button
@@ -103,12 +122,12 @@ func (b *MouseButton) FromString(s string) error {
 	return fmt.Errorf("libghostty: unknown mouse button %q", s)
 }
 
-// NewMouseButtonFromString returns the MouseButton value for the
-// given canonical name (e.g. "left", "right", "four"). Returns an
-// error if the name is not recognized.
-func NewMouseButtonFromString(s string) (MouseButton, error) {
+// ParseMouseButton returns the MouseButton value for the given
+// canonical name (e.g. "left", "right", "four"). Returns an error
+// if the name is not recognized.
+func ParseMouseButton(s string) (MouseButton, error) {
 	var b MouseButton
-	if err := b.FromString(s); err != nil {
+	if err := b.UnmarshalText([]byte(s)); err != nil {
 		return MouseButtonUnknown, err
 	}
 	return b, nil

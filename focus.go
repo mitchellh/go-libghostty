@@ -10,8 +10,16 @@ package libghostty
 import "C"
 
 import (
+	"encoding"
 	"fmt"
 	"unsafe"
+)
+
+// Compile-time assertions that FocusEvent implements the standard
+// text marshaling interfaces.
+var (
+	_ encoding.TextMarshaler   = FocusEvent(0)
+	_ encoding.TextUnmarshaler = (*FocusEvent)(nil)
 )
 
 // FocusEvent represents a focus gained or lost event for focus
@@ -41,27 +49,35 @@ func (f FocusEvent) String() string {
 	}
 }
 
-// FromString parses a focus event name ("gained" or "lost") and
-// stores the corresponding FocusEvent value in the receiver.
-// Returns an error if the name is not recognized.
-func (f *FocusEvent) FromString(s string) error {
-	switch s {
+// MarshalText implements encoding.TextMarshaler. The output is the
+// same as String() so the type integrates with encoding/json and
+// other text-based encoders.
+func (f FocusEvent) MarshalText() ([]byte, error) {
+	return []byte(f.String()), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler. It parses a
+// focus event name ("gained" or "lost") and stores the
+// corresponding FocusEvent value in the receiver. Returns an error
+// if the name is not recognized.
+func (f *FocusEvent) UnmarshalText(text []byte) error {
+	switch string(text) {
 	case "gained":
 		*f = FocusGained
 	case "lost":
 		*f = FocusLost
 	default:
-		return fmt.Errorf("libghostty: unknown focus event %q", s)
+		return fmt.Errorf("libghostty: unknown focus event %q", string(text))
 	}
 	return nil
 }
 
-// NewFocusEventFromString returns the FocusEvent value for the
-// given name ("gained" or "lost"). Returns an error if the name
-// is not recognized.
-func NewFocusEventFromString(s string) (FocusEvent, error) {
+// ParseFocusEvent returns the FocusEvent value for the given name
+// ("gained" or "lost"). Returns an error if the name is not
+// recognized.
+func ParseFocusEvent(s string) (FocusEvent, error) {
 	var f FocusEvent
-	if err := f.FromString(s); err != nil {
+	if err := f.UnmarshalText([]byte(s)); err != nil {
 		return 0, err
 	}
 	return f, nil
