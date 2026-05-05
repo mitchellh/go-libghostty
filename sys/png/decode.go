@@ -7,8 +7,8 @@
 // only when you need PNG decoding:
 //
 //	import (
-//		libghostty "github.com/mitchellh/go-libghostty"
-//		syspng "github.com/mitchellh/go-libghostty/sys/png"
+//		libghostty "go.mitchellh.com/libghostty"
+//		syspng "go.mitchellh.com/libghostty/sys/png"
 //	)
 //
 //	libghostty.SysSetDecodePng(syspng.Decode)
@@ -20,7 +20,7 @@ import (
 	"image"
 	goimg "image/png"
 
-	libghostty "github.com/mitchellh/go-libghostty"
+	libghostty "go.mitchellh.com/libghostty"
 )
 
 // Decode is a ready-to-use [libghostty.SysDecodePngFn] implementation

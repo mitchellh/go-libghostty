@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/mitchellh/go-libghostty"
+	"go.mitchellh.com/libghostty"
 )
 
 // resolveColor converts a StyleColor to a concrete ColorRGB using the

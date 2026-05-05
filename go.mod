@@ -1,3 +1,3 @@
-module github.com/mitchellh/go-libghostty
+module go.mitchellh.com/libghostty
 
 go 1.26.0

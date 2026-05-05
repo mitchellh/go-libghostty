@@ -22,7 +22,7 @@ import (
  "fmt"
  "log"
 
- "github.com/mitchellh/go-libghostty"
+ "go.mitchellh.com/libghostty"
 )
 
 func main() {
@@ -57,7 +57,7 @@ More examples are in the [`examples/`](examples/) directory.
 Add the module to your Go project:
 
 ```shell
-go get github.com/mitchellh/go-libghostty
+go get go.mitchellh.com/libghostty
 ```
 
 This is a cgo package that links `libghostty-vt` via `pkg-config`. By

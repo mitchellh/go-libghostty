@@ -5,7 +5,7 @@ package main
 import (
 	"fmt"
 
-	ghostty "github.com/mitchellh/go-libghostty"
+	ghostty "go.mitchellh.com/libghostty"
 )
 
 func main() {

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log"
 
-	lg "github.com/mitchellh/go-libghostty"
+	lg "go.mitchellh.com/libghostty"
 )
 
 func main() {
