@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+#
+# Run the given command and translate transient `zig fetch` network
+# failures into a distinct exit code (75) so the Buildkite step can
+# retry only on those, not on real build failures.
+#
+# Why 75: it's `EX_TEMPFAIL` from sysexits.h and is unlikely to collide
+# with real failure exit codes from go/cmake/zig.
+#
+# We tee the combined output through a pattern match. If the original
+# command failed AND the output contains a known transient zig fetch
+# error, we exit 75; otherwise we propagate the original exit code.
+
+set -uo pipefail
+
+TMP_LOG="$(mktemp)"
+trap 'rm -f "$TMP_LOG"' EXIT
+
+# Run the command, streaming combined stdout/stderr to both the live
+# log and a temp file we can grep afterward. `pipefail` ensures we see
+# the real command's exit status, not tee's.
+( "$@" 2>&1 ) | tee "$TMP_LOG"
+status=${PIPESTATUS[0]}
+
+if [ "$status" -ne 0 ]; then
+    # Patterns observed for transient zig package fetch failures from
+    # deps.files.ghostty.org. Add new patterns here as they appear.
+    if grep -E -q \
+        -e 'invalid HTTP response: HttpConnectionClosing' \
+        -e 'TemporaryNameServerFailure' \
+        -e 'ConnectionResetByPeer' \
+        -e 'ConnectionTimedOut' \
+        -e 'TlsInitializationFailed' \
+        -e 'UnexpectedReadFailure' \
+        "$TMP_LOG"; then
+        echo "--- :recycle: Detected transient zig fetch failure; signaling retry (exit 75)"
+        exit 75
+    fi
+fi
+
+exit "$status"
