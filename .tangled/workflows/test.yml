@@ -1,0 +1,12 @@
+when:
+  - event: ["push"]
+    branch: ["main"]
+  - event: ["pull_request"]
+    branch: ["main"]
+
+engine: tack
+
+tack:
+  buildkite:
+    org: mitchellh
+    pipeline: go-libghostty

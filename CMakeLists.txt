@@ -8,12 +8,28 @@ FetchContent_Declare(ghostty
 )
 FetchContent_MakeAvailable(ghostty)
 
-# Cross-compilation targets for CI and multi-platform builds.
-# Each call produces ghostty-vt-static-<NAME> and ghostty-vt-<NAME>
-# IMPORTED targets whose output lands under build/ghostty-<NAME>/.
-ghostty_vt_add_target(NAME linux-amd64    ZIG_TARGET x86_64-linux-gnu)
-ghostty_vt_add_target(NAME linux-arm64    ZIG_TARGET aarch64-linux-gnu)
-ghostty_vt_add_target(NAME macos-amd64    ZIG_TARGET x86_64-macos)
-ghostty_vt_add_target(NAME macos-arm64    ZIG_TARGET aarch64-macos)
-ghostty_vt_add_target(NAME windows-amd64  ZIG_TARGET x86_64-windows-gnu)
-ghostty_vt_add_target(NAME windows-arm64  ZIG_TARGET aarch64-windows-gnu)
+# Optional cross-compilation targets.
+#
+# By default this CMakeLists only builds the native libghostty-vt so
+# that local `make build` / `make test` cycles stay fast. CI opts in
+# to specific cross targets by passing this variable, which produces
+# the corresponding `ghostty-vt-static-<NAME>` IMPORTED target with
+# outputs under `build/ghostty-<NAME>/`.
+#
+# The value is a semicolon-separated list of `<name>=<zig-target>`
+# entries, e.g.:
+#
+#   cmake -B build \
+#     -DGHOSTTY_VT_CROSS_TARGETS="linux-amd64=x86_64-linux-gnu"
+#
+# Multiple targets can be configured at once by separating with `;`.
+set(GHOSTTY_VT_CROSS_TARGETS "" CACHE STRING
+    "Semicolon-separated <name>=<zig-target> cross targets to build")
+
+foreach(_entry IN LISTS GHOSTTY_VT_CROSS_TARGETS)
+    if(NOT _entry MATCHES "^([^=]+)=(.+)$")
+        message(FATAL_ERROR
+            "GHOSTTY_VT_CROSS_TARGETS entry must be <name>=<zig-target>: ${_entry}")
+    endif()
+    ghostty_vt_add_target(NAME ${CMAKE_MATCH_1} ZIG_TARGET ${CMAKE_MATCH_2})
+endforeach()

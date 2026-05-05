@@ -25,6 +25,7 @@
             pkgs.cmake
             pkgs.go
             pkgs.pinact
+            pkgs.pkg-config
             (if pkgs.stdenv.isDarwin
               then zig.packages.${system}.brew."0.15.2"
               else zig.packages.${system}."0.15.2")

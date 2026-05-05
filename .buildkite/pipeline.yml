@@ -1,0 +1,65 @@
+# In-repo Buildkite pipeline. The Buildkite-side pipeline only needs
+# one step that does `buildkite-agent pipeline upload`; everything
+# real lives here.
+
+steps:
+  - label: ":go: fmt"
+    # Mirror the original GitHub Actions check: `gofmt -l` lists files
+    # that would be reformatted, so we fail the build if that list is
+    # non-empty. Using `nix develop -c` ensures the same `go` toolchain
+    # the rest of the pipeline uses.
+    command: nix develop -c sh -c 'test -z "$(gofmt -l .)"'
+
+  - label: ":go: test"
+    # Build libghostty via cmake (`make build`) and then run the full
+    # Go test suite. Both happen inside the flake's dev shell so the
+    # toolchain (cmake, go, zig for cgo) matches local development.
+    command: |
+      nix develop -c make build
+      nix develop -c make test
+
+  - label: ":package: build (shared)"
+    # Default cgo build: dynamically links against libghostty-vt.
+    # Confirms the standard build path still compiles end-to-end.
+    command: |
+      nix develop -c make build
+      nix develop -c go build ./...
+
+  - label: ":package: build (static)"
+    # `-tags static` swaps the cgo wiring to statically link
+    # libghostty-vt. Verified separately because the linker flags and
+    # symbol resolution differ from the shared build.
+    command: |
+      nix develop -c make build
+      nix develop -c go build -tags static ./...
+
+  - label: ":go: example {{matrix}}"
+    # One step per example program under examples/. Each example is a
+    # standalone main package that exercises a slice of the bindings,
+    # so running them all is the cheapest end-to-end smoke test we
+    # have. Keep this list in sync with `ls examples/`.
+    command: |
+      nix develop -c make build
+      nix develop -c go run ./examples/{{matrix}}/
+    matrix:
+      - build-info
+      - colors
+      - effects
+      - formatter
+      - grid-traverse
+      - modes
+      - render
+
+  - label: ":zig: cross {{matrix}}"
+    # Cross-compile the package for each supported GOOS/GOARCH using
+    # `zig cc` as the cgo compiler (see Makefile `cross-<target>`
+    # rules). This catches platform-specific cgo and linker issues
+    # without needing native runners for every target.
+    command: nix develop -c make cross-{{matrix}}
+    matrix:
+      - linux-amd64
+      - linux-arm64
+      - macos-amd64
+      - macos-arm64
+      - windows-amd64
+      - windows-arm64

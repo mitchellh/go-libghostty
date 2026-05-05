@@ -1,0 +1,35 @@
+#!/bin/sh
+#
+# Buildkite pre-command hook: install Determinate Nix on the agent
+# before each command step runs. We rely on Nix (with flakes) for our
+# build environment, so every fresh agent needs it bootstrapped.
+#
+# Determinate's installer enables flakes and `nix-command` by default
+# and is more reliable in CI than the upstream installer, so we don't
+# need to stage a custom nix.conf.
+
+set -eu
+
+# Install Nix without touching the agent's init system. The `?ci=buildkite`
+# query param is informational; it lets Determinate tag installer telemetry.
+curl --proto '=https' --tlsv1.2 -sSf -L \
+    "https://install.determinate.systems/nix?ci=buildkite" \
+    | sh -s -- install linux --no-confirm --init none
+
+# Start the Determinate daemon ourselves since we passed `--init none`.
+# Point the Nix client at the daemon for the rest of this shell.
+nohup /usr/local/bin/determinate-nixd daemon &
+export NIX_REMOTE=daemon
+
+# Wait for the daemon to become responsive before handing control back
+# to the command step.
+while ! determinate-nixd status >/dev/null 2>&1; do
+    sleep 0.1
+done
+
+# Put `nix` on PATH for the command step. Buildkite sources hooks, so
+# this export propagates. With `--init none` we never edited any shell
+# profile, so we have to do it ourselves. The default profile holds the
+# `nix` binary; the per-user profile holds anything `nix profile install`
+# adds later.
+export PATH="/nix/var/nix/profiles/default/bin:$HOME/.nix-profile/bin:$PATH"
