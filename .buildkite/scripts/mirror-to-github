@@ -1,0 +1,51 @@
+#!/bin/sh
+#
+# Mirror the source repository's branches and tags to the GitHub
+# mirror at github.com/mitchellh/go-libghostty.
+#
+# This step runs only on `main` (gated by pipeline.yml) but pushes
+# *all* branches and tags so the GitHub repo stays a faithful mirror
+# of whatever the canonical source is. Refs that disappear on the
+# source side are pruned on GitHub via `git push --prune`.
+#
+# Authentication: the deploy key for the GitHub mirror lives in the
+# Buildkite cluster secret `GITHUB_MIRROR_SSH_KEY`. We materialize it
+# to a temp file, point GIT_SSH_COMMAND at it, and clean up on exit.
+
+set -eu
+
+# Materialize the deploy key into a tempfile that only we can read.
+# `mktemp` on macOS and Linux both default to mode 600, but we chmod
+# anyway because ssh refuses keys with looser permissions.
+KEY="$(mktemp)"
+trap 'rm -f "$KEY"' EXIT
+buildkite-agent secret get GITHUB_MIRROR_SSH_KEY > "$KEY"
+chmod 600 "$KEY"
+
+# Force ssh to use *only* this key (IdentitiesOnly) so it can't fall
+# back to whatever the agent has lying around. accept-new pins the
+# host key on first contact without prompting; we don't persist it
+# anywhere because the agent is ephemeral.
+export GIT_SSH_COMMAND="ssh -i $KEY -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+
+MIRROR_URL="git@github.com:mitchellh/go-libghostty.git"
+
+# Buildkite's default checkout is a shallow, single-branch fetch from
+# origin. To mirror everything we need every branch and tag locally,
+# so refresh refs/heads/* and refs/tags/* from origin first. The `+`
+# prefix forces non-fast-forward updates in case origin rewrote
+# history (unusual, but harmless here).
+git fetch --prune --tags origin \
+    '+refs/heads/*:refs/heads/*' \
+    '+refs/tags/*:refs/tags/*'
+
+# Push everything to GitHub. Explicit refspecs (rather than --mirror)
+# scope the push to branches and tags only; --mirror would also try
+# to push refs/remotes/origin/*, which we don't want on the mirror.
+# --prune deletes refs on GitHub that no longer exist on the source,
+# matching `--mirror` semantics for the refs we do care about.
+# --force is required because we're an authoritative one-way mirror:
+# anything that diverges on GitHub gets overwritten.
+git push --prune --force "$MIRROR_URL" \
+    'refs/heads/*:refs/heads/*' \
+    'refs/tags/*:refs/tags/*'

@@ -82,3 +82,22 @@ steps:
       - macos-arm64
       - windows-amd64
       - windows-arm64
+
+  # Block the mirror step until every build/test step above has
+  # passed. We never want to publish a broken main to the public
+  # GitHub mirror.
+  - wait
+
+  - label: ":github: mirror to github"
+    # Only mirror from main; feature branches and PRs should not
+    # republish themselves to the public mirror.
+    branches: "main"
+    # Serialize mirror pushes across builds. Without this, two main
+    # builds finishing close together could race and produce
+    # non-fast-forward push churn (or worse, lose a ref).
+    concurrency: 1
+    concurrency_group: "go-libghostty/github-mirror"
+    # Reads the GITHUB_MIRROR_SSH_KEY cluster secret, fetches all
+    # branches/tags from origin, and force-pushes them (with --prune)
+    # to github.com/mitchellh/go-libghostty.
+    command: .buildkite/scripts/mirror-to-github
