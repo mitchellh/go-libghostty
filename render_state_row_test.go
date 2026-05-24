@@ -136,3 +136,69 @@ func TestRenderStateRowIteratorRaw(t *testing.T) {
 		t.Fatal("expected first row not to be wrapped")
 	}
 }
+
+func TestRenderStateRowIteratorSelection(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	term.VTWrite([]byte("hello"))
+	start, err := term.GridRef(Point{Tag: PointTagActive, X: 1, Y: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	end, err := term.GridRef(Point{Tag: PointTagActive, X: 3, Y: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := term.SetSelection(&Selection{Start: *start, End: *end}); err != nil {
+		t.Fatal(err)
+	}
+
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+
+	if err := rs.Update(term); err != nil {
+		t.Fatal(err)
+	}
+
+	ri, err := NewRenderStateRowIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ri.Close()
+
+	if err := rs.RowIterator(ri); err != nil {
+		t.Fatal(err)
+	}
+
+	if !ri.Next() {
+		t.Fatal("expected at least one row")
+	}
+	sel, err := ri.Selection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel == nil {
+		t.Fatal("expected row selection")
+	}
+	if sel.StartX != 1 || sel.EndX != 3 {
+		t.Fatalf("expected row selection 1..3, got %d..%d", sel.StartX, sel.EndX)
+	}
+
+	if !ri.Next() {
+		t.Fatal("expected second row")
+	}
+	sel, err = ri.Selection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel != nil {
+		t.Fatalf("expected no row selection on second row, got %+v", sel)
+	}
+}

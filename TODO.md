@@ -10,8 +10,8 @@
 - [x] Focus encoding (`focus.h`)
 - [x] Kitty graphics (`kitty_graphics.h`)
 - [x] Allocator (`allocator.h` — `ghostty_alloc`, `ghostty_free`)
-- [ ] Selection APIs (`selection.h`)
-- [ ] Render-state row selection (`GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION`)
+- [x] Selection APIs (`selection.h`)
+- [x] Render-state row selection (`GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION`)
 
 ## Partially Bound
 

@@ -5,6 +5,13 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
+
+// Helper to create a properly initialized GhosttyRenderStateRowSelection
+// (sized struct).
+static inline GhosttyRenderStateRowSelection init_render_state_row_selection() {
+	GhosttyRenderStateRowSelection sel = GHOSTTY_INIT_SIZED(GhosttyRenderStateRowSelection);
+	return sel;
+}
 */
 import "C"
 
@@ -31,7 +38,22 @@ const (
 	// RenderStateRowDataCells populates a pre-allocated row cells instance
 	// (GhosttyRenderStateRowCells).
 	RenderStateRowDataCells RenderStateRowData = C.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS
+
+	// RenderStateRowDataSelection is the row-local selected cell range
+	// (GhosttyRenderStateRowSelection).
+	RenderStateRowDataSelection RenderStateRowData = C.GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION
 )
+
+// RenderStateRowSelection is the row-local selected cell range.
+// C: GhosttyRenderStateRowSelection
+type RenderStateRowSelection struct {
+	// StartX is the start column of the row-local selection range,
+	// inclusive.
+	StartX uint16
+
+	// EndX is the end column of the row-local selection range, inclusive.
+	EndX uint16
+}
 
 // RenderStateRowIterator iterates over rows in a render state.
 // Create one with NewRenderStateRowIterator, populate it via
@@ -136,6 +158,30 @@ func (ri *RenderStateRowIterator) Raw() (*Row, error) {
 		return nil, err
 	}
 	return &Row{c: v}, nil
+}
+
+// Selection returns the row-local selected cell range for the current row. It
+// returns nil when the current row does not intersect the terminal's active
+// selection at the time the render state was updated.
+func (ri *RenderStateRowIterator) Selection() (*RenderStateRowSelection, error) {
+	v := C.init_render_state_row_selection()
+	err := resultError(C.ghostty_render_state_row_get(
+		ri.ptr,
+		C.GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION,
+		unsafe.Pointer(&v),
+	))
+	if err != nil {
+		var ge *Error
+		if errors.As(err, &ge) && ge.Result == ResultNoValue {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &RenderStateRowSelection{
+		StartX: uint16(v.start_x),
+		EndX:   uint16(v.end_x),
+	}, nil
 }
 
 // Cells populates a pre-allocated row cells instance with cell data
