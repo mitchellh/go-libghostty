@@ -49,3 +49,14 @@ func (p Point) toC() C.GhosttyPoint {
 	coord.y = C.uint32_t(p.Y)
 	return cp
 }
+
+// pointFromC converts a C coordinate plus its requested tag into a Go
+// Point. The C APIs that resolve refs back to points return only the
+// coordinate because the caller already selected the coordinate system.
+func pointFromC(tag PointTag, coord C.GhosttyPointCoordinate) Point {
+	return Point{
+		Tag: tag,
+		X:   uint16(coord.x),
+		Y:   uint32(coord.y),
+	}
+}

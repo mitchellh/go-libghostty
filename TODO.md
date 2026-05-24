@@ -11,7 +11,6 @@
 - [x] Kitty graphics (`kitty_graphics.h`)
 - [x] Allocator (`allocator.h` — `ghostty_alloc`, `ghostty_free`)
 - [ ] Selection APIs (`selection.h`)
-- [ ] Tracked grid references (`grid_ref_tracked.h`, `ghostty_terminal_grid_ref_track()`)
 - [ ] Render-state row selection (`GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION`)
 
 ## Partially Bound
@@ -21,6 +20,4 @@
 - [ ] `ghostty_type_json()`
 - [ ] `ghostty_style_default()`
 - [ ] `ghostty_color_rgb_get()`
-- [ ] `ghostty_grid_ref_hyperlink_uri()`
-- [ ] `ghostty_terminal_point_from_grid_ref()`
 - [ ] `ghostty_formatter_format_buf()`

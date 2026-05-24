@@ -420,6 +420,45 @@ func (t *Terminal) GridRef(point Point) (*GridRef, error) {
 	return &GridRef{ref: ref}, nil
 }
 
+// TrackGridRef creates an owned tracked grid reference for a terminal
+// point. The returned reference follows the referenced cell as normal
+// screen operations update the terminal page list. Close the returned
+// reference when finished.
+//
+// The tracked reference is attached to the terminal screen/page-list that
+// is active when this method is called. If the terminal is closed first,
+// the tracked handle remains valid only for tracked-grid-ref APIs: it
+// reports no value and can still be closed.
+func (t *Terminal) TrackGridRef(point Point) (*TrackedGridRef, error) {
+	var ptr C.GhosttyTrackedGridRef
+	if err := resultError(C.ghostty_terminal_grid_ref_track(
+		t.ptr,
+		point.toC(),
+		&ptr,
+	)); err != nil {
+		return nil, err
+	}
+	return &TrackedGridRef{ptr: ptr}, nil
+}
+
+// PointFromGridRef converts a grid reference back to a point in the
+// requested coordinate system. The grid reference must come from the same
+// terminal and must still be valid. If the reference cannot be represented
+// in the requested coordinate system, this returns an error with
+// ResultNoValue.
+func (t *Terminal) PointFromGridRef(ref *GridRef, tag PointTag) (Point, error) {
+	var coord C.GhosttyPointCoordinate
+	if err := resultError(C.ghostty_terminal_point_from_grid_ref(
+		t.ptr,
+		&ref.ref,
+		C.GhosttyPointTag(tag),
+		&coord,
+	)); err != nil {
+		return Point{}, err
+	}
+	return pointFromC(tag, coord), nil
+}
+
 // handleToPointer converts a cgo.Handle (uintptr) to unsafe.Pointer
 // for passing as C userdata. The handle is an opaque integer, not a
 // real Go pointer, so we suppress checkptr which would otherwise

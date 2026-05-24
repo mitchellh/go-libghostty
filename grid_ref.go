@@ -85,6 +85,38 @@ func (g *GridRef) Graphemes() ([]uint32, error) {
 	return buf[:uint(outLen)], nil
 }
 
+// HyperlinkURI returns the URI for the hyperlink at the grid reference's
+// position. It returns an empty string when the cell has no hyperlink.
+func (g *GridRef) HyperlinkURI() (string, error) {
+	// First call to get the required length. A cell with no hyperlink returns
+	// success with a length of zero; a hyperlinked cell returns OUT_OF_SPACE
+	// and reports the buffer size needed for the URI bytes.
+	var outLen C.size_t
+	err := resultError(C.ghostty_grid_ref_hyperlink_uri(&g.ref, nil, 0, &outLen))
+	if err != nil {
+		ge, ok := err.(*Error)
+		if !ok || ge.Result != ResultOutOfSpace {
+			return "", err
+		}
+	}
+
+	if outLen == 0 {
+		return "", nil
+	}
+
+	buf := make([]byte, uint(outLen))
+	if err := resultError(C.ghostty_grid_ref_hyperlink_uri(
+		&g.ref,
+		(*C.uint8_t)(unsafe.Pointer(&buf[0])),
+		C.size_t(len(buf)),
+		&outLen,
+	)); err != nil {
+		return "", err
+	}
+
+	return string(buf[:uint(outLen)]), nil
+}
+
 // Style returns the style of the cell at the grid reference's position.
 func (g *GridRef) Style() (*Style, error) {
 	cs := initCStyle()
