@@ -57,6 +57,10 @@ type BuildInfo struct {
 	// VersionPatch is the patch version number.
 	VersionPatch uint
 
+	// VersionPre is the pre-release metadata string (e.g. "alpha",
+	// "beta", or "dev"). Empty if no pre-release metadata is present.
+	VersionPre string
+
 	// VersionBuild is the build metadata string (e.g. commit hash).
 	// Empty if no build metadata is present.
 	VersionBuild string
@@ -114,6 +118,12 @@ func GetBuildInfo() (BuildInfo, error) {
 		return info, err
 	}
 	info.VersionPatch = uint(patch)
+
+	var verPre C.GhosttyString
+	if err := resultError(C.ghostty_build_info(C.GHOSTTY_BUILD_INFO_VERSION_PRE, unsafe.Pointer(&verPre))); err != nil {
+		return info, err
+	}
+	info.VersionPre = C.GoStringN((*C.char)(unsafe.Pointer(verPre.ptr)), C.int(verPre.len))
 
 	var verBuild C.GhosttyString
 	if err := resultError(C.ghostty_build_info(C.GHOSTTY_BUILD_INFO_VERSION_BUILD, unsafe.Pointer(&verBuild))); err != nil {

@@ -134,6 +134,10 @@ const (
 	// TerminalDataKittyGraphics is the Kitty graphics image storage for
 	// the active screen (GhosttyKittyGraphics).
 	TerminalDataKittyGraphics TerminalData = C.GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS
+
+	// TerminalDataSelection is the active screen's current selection
+	// (GhosttySelection).
+	TerminalDataSelection TerminalData = C.GHOSTTY_TERMINAL_DATA_SELECTION
 )
 
 // ActiveScreen returns which screen buffer is currently active.
@@ -331,10 +335,37 @@ func (t *Terminal) Pwd() (string, error) {
 // Rows returns the terminal height in cells.
 func (t *Terminal) Rows() (uint16, error) {
 	var v C.uint16_t
-	if err := resultError(C.ghostty_terminal_get(t.ptr, C.GHOSTTY_TERMINAL_DATA_ROWS, unsafe.Pointer(&v))); err != nil {
+	if err := resultError(C.ghostty_terminal_get(t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_ROWS,
+		unsafe.Pointer(&v),
+	)); err != nil {
 		return 0, err
 	}
 	return uint16(v), nil
+}
+
+// Selection returns the active screen selection. It returns nil when
+// there is no active selection.
+//
+// The returned selection contains borrowed grid references into terminal
+// internals. Any later mutating terminal operation may invalidate them, so
+// callers should read and cache needed data immediately.
+func (t *Terminal) Selection() (*Selection, error) {
+	cs := initCSelection()
+	err := resultError(C.ghostty_terminal_get(t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_SELECTION,
+		unsafe.Pointer(&cs),
+	))
+	if err != nil {
+		var ge *Error
+		if errors.As(err, &ge) && ge.Result == ResultNoValue {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	sel := selectionFromC(cs)
+	return &sel, nil
 }
 
 // Scrollbar returns the scrollbar state for the terminal viewport.

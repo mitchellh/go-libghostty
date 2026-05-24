@@ -129,6 +129,38 @@ func (t *Terminal) SetColorPalette(palette *Palette) error {
 	))
 }
 
+// SetAPCMaxBytes sets the maximum bytes the APC handler will buffer for
+// all protocols. Passing nil removes all overrides and reverts to the
+// built-in defaults.
+func (t *Terminal) SetAPCMaxBytes(limit *uint) error {
+	var val unsafe.Pointer
+	if limit != nil {
+		v := C.size_t(*limit)
+		val = unsafe.Pointer(&v)
+	}
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_APC_MAX_BYTES,
+		val,
+	))
+}
+
+// SetAPCMaxBytesKitty sets the maximum bytes the APC handler will buffer
+// for Kitty graphics protocol data. Passing nil removes the override and
+// reverts to the built-in default.
+func (t *Terminal) SetAPCMaxBytesKitty(limit *uint) error {
+	var val unsafe.Pointer
+	if limit != nil {
+		v := C.size_t(*limit)
+		val = unsafe.Pointer(&v)
+	}
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_APC_MAX_BYTES_KITTY,
+		val,
+	))
+}
+
 // SetPwd sets the terminal working directory manually. An empty string
 // clears it.
 func (t *Terminal) SetPwd(pwd string) error {
@@ -140,6 +172,28 @@ func (t *Terminal) SetPwd(pwd string) error {
 		t.ptr,
 		C.GHOSTTY_TERMINAL_OPT_PWD,
 		unsafe.Pointer(&s),
+	))
+}
+
+// SetSelection sets the active screen selection. Passing nil clears the
+// active screen selection.
+//
+// The terminal copies the selection immediately and converts it to
+// terminal-owned tracked state, so the Selection value and its untracked
+// grid references do not need to outlive this call.
+func (t *Terminal) SetSelection(sel *Selection) error {
+	var val unsafe.Pointer
+	if sel != nil {
+		cs := initCSelection()
+		cs.start = sel.Start.ref
+		cs.end = sel.End.ref
+		cs.rectangle = C.bool(sel.Rectangle)
+		val = unsafe.Pointer(&cs)
+	}
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_SELECTION,
+		val,
 	))
 }
 

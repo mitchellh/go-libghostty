@@ -16,12 +16,6 @@
 
 ## Partially Bound
 
-- [ ] `GHOSTTY_BUILD_INFO_VERSION_PRE`
-- [ ] `GHOSTTY_MODE_BACKARROW_KEY_MODE`
-- [ ] `GHOSTTY_TERMINAL_DATA_SELECTION`
-- [ ] `GHOSTTY_TERMINAL_OPT_APC_MAX_BYTES`
-- [ ] `GHOSTTY_TERMINAL_OPT_APC_MAX_BYTES_KITTY`
-- [ ] `GHOSTTY_TERMINAL_OPT_SELECTION`
 - [ ] `ghostty_mode_report_encode()`
 - [ ] `ghostty_size_report_encode()`
 - [ ] `ghostty_type_json()`

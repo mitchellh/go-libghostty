@@ -111,6 +111,54 @@ func TestTerminalPwd(t *testing.T) {
 	}
 }
 
+func TestTerminalSelection(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// No selection is active initially.
+	sel, err := term.Selection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel != nil {
+		t.Fatal("expected nil selection before setting")
+	}
+
+	start, err := term.GridRef(Point{Tag: PointTagActive, X: 0, Y: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	end, err := term.GridRef(Point{Tag: PointTagActive, X: 1, Y: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := term.SetSelection(&Selection{Start: *start, End: *end}); err != nil {
+		t.Fatal(err)
+	}
+	sel, err = term.Selection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel == nil {
+		t.Fatal("expected non-nil selection after setting")
+	}
+
+	if err := term.SetSelection(nil); err != nil {
+		t.Fatal(err)
+	}
+	sel, err = term.Selection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel != nil {
+		t.Fatal("expected nil selection after clearing")
+	}
+}
+
 func TestTerminalTotalScrollbackRows(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24), WithMaxScrollback(100))
 	if err != nil {

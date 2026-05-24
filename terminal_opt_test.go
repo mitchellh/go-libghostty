@@ -67,6 +67,30 @@ func TestTerminalSetColors(t *testing.T) {
 	}
 }
 
+func TestTerminalSetAPCMaxBytes(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	limit := uint(1024)
+	if err := term.SetAPCMaxBytes(&limit); err != nil {
+		t.Fatal(err)
+	}
+	if err := term.SetAPCMaxBytes(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	kittyLimit := uint(512)
+	if err := term.SetAPCMaxBytesKitty(&kittyLimit); err != nil {
+		t.Fatal(err)
+	}
+	if err := term.SetAPCMaxBytesKitty(nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTerminalWithBell(t *testing.T) {
 	var bellCount int
 	term, err := NewTerminal(WithSize(80, 24), WithBell(func(_ *Terminal) {

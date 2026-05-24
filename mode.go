@@ -81,6 +81,9 @@ var (
 	// ModeKeypadKeys is application keypad mode.
 	ModeKeypadKeys = Mode(C.GHOSTTY_MODE_KEYPAD_KEYS)
 
+	// ModeBackarrowKeyMode is backarrow key mode (DECBKM).
+	ModeBackarrowKeyMode = Mode(C.GHOSTTY_MODE_BACKARROW_KEY_MODE)
+
 	// ModeLeftRightMargin is left/right margin mode.
 	ModeLeftRightMargin = Mode(C.GHOSTTY_MODE_LEFT_RIGHT_MARGIN)
 

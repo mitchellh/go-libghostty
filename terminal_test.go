@@ -123,6 +123,7 @@ func TestTerminalModeGetSet(t *testing.T) {
 	}{
 		{"CursorVisible", ModeCursorVisible, true},
 		{"Wraparound", ModeWraparound, true},
+		{"BackarrowKeyMode", ModeBackarrowKeyMode, false},
 		{"BracketedPaste", ModeBracketedPaste, false},
 		{"FocusEvent", ModeFocusEvent, false},
 		{"AltScreen", ModeAltScreen, false},
@@ -186,6 +187,7 @@ func TestTerminalModeVTWrite(t *testing.T) {
 		defaultVal bool
 	}{
 		{"BracketedPaste", ModeBracketedPaste, "\x1b[?2004h", "\x1b[?2004l", false},
+		{"BackarrowKeyMode", ModeBackarrowKeyMode, "\x1b[?67h", "\x1b[?67l", false},
 		{"CursorVisible", ModeCursorVisible, "\x1b[?25h", "\x1b[?25l", true},
 		{"FocusEvent", ModeFocusEvent, "\x1b[?1004h", "\x1b[?1004l", false},
 		{"NormalMouse", ModeNormalMouse, "\x1b[?1000h", "\x1b[?1000l", false},

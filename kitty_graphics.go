@@ -26,6 +26,13 @@ import (
 	"unsafe"
 )
 
+// initCSelection returns a zero-initialized C GhosttySelection with its
+// size field set (GHOSTTY_INIT_SIZED). Used by terminal selection APIs
+// that need to pass a sized selection struct to C.
+func initCSelection() C.GhosttySelection {
+	return C.init_selection()
+}
+
 // KittyGraphicsImageData identifies a data field for Kitty graphics
 // image queries.
 // C: GhosttyKittyGraphicsImageData
