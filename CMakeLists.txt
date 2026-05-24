@@ -4,7 +4,7 @@ project(go-libghostty LANGUAGES C)
 include(FetchContent)
 FetchContent_Declare(ghostty
     GIT_REPOSITORY https://github.com/ghostty-org/ghostty.git
-    GIT_TAG 2ed382a15566b267c32fae440b065f7844b15bfb
+    GIT_TAG c5946f4fefd9382ba00d21c1bed0b6ff33a1b687
 )
 FetchContent_MakeAvailable(ghostty)
 
