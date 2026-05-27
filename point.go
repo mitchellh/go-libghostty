@@ -7,6 +7,28 @@ import "C"
 
 import "unsafe"
 
+// PointCoordinate is an untagged coordinate in the terminal grid.
+//
+// It is used by APIs that already define which coordinate system applies,
+// such as selection gesture autoscroll viewport positions. Use [Point] when
+// an API needs the coordinate system tag alongside X and Y.
+// C: GhosttyPointCoordinate
+type PointCoordinate struct {
+	// X is the column (0-indexed).
+	X uint16
+
+	// Y is the row (0-indexed). May exceed page size for screen/history tags.
+	Y uint32
+}
+
+// toC converts a Go PointCoordinate to a C GhosttyPointCoordinate.
+func (p PointCoordinate) toC() C.GhosttyPointCoordinate {
+	return C.GhosttyPointCoordinate{
+		x: C.uint16_t(p.X),
+		y: C.uint32_t(p.Y),
+	}
+}
+
 // PointTag determines which coordinate system a point uses.
 // C: GhosttyPointTag
 type PointTag int

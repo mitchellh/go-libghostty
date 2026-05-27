@@ -27,16 +27,7 @@
 - [x] Kitty graphics (`kitty_graphics.h`)
 - [x] Allocator (`allocator.h` — `ghostty_alloc`, `ghostty_free`)
 - [x] Terminal selection helpers (`selection.h`)
-- [ ] Selection gesture APIs (`selection.h`)
-  - `ghostty_selection_gesture_new()`
-  - `ghostty_selection_gesture_free()`
-  - `ghostty_selection_gesture_reset()`
-  - `ghostty_selection_gesture_event_new()`
-  - `ghostty_selection_gesture_event_free()`
-  - `ghostty_selection_gesture_event_set()`
-  - `ghostty_selection_gesture_event()`
-  - `ghostty_selection_gesture_get()`
-  - `ghostty_selection_gesture_get_multi()`
+- [x] Selection gesture APIs (`selection.h`)
 - [x] Render-state row selection (`GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION`)
 - [x] Build info (`build_info.h`)
 
