@@ -234,6 +234,53 @@ func TestTerminalMouseTracking(t *testing.T) {
 	}
 }
 
+func TestTerminalViewportActive(t *testing.T) {
+	term, err := NewTerminal(WithSize(8, 3), WithMaxScrollback(100))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	active, err := term.ViewportActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !active {
+		t.Fatal("expected fresh terminal viewport to be active")
+	}
+
+	// Fill more rows than the viewport can show so that scrolling to the
+	// top moves the viewport into history rather than leaving it pinned to
+	// the active area.
+	term.VTWrite([]byte("alpha\r\nbravo\r\ncharlie\r\ndelta"))
+
+	active, err = term.ViewportActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !active {
+		t.Fatal("expected viewport to remain active after writing")
+	}
+
+	term.ScrollViewportTop()
+	active, err = term.ViewportActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active {
+		t.Fatal("expected viewport to be inactive after scrolling into history")
+	}
+
+	term.ScrollViewportBottom()
+	active, err = term.ViewportActive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !active {
+		t.Fatal("expected viewport to be active after scrolling to bottom")
+	}
+}
+
 func TestTerminalColorRoundTrip(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {

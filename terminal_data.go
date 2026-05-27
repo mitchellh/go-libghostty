@@ -138,6 +138,10 @@ const (
 	// TerminalDataSelection is the active screen's current selection
 	// (GhosttySelection).
 	TerminalDataSelection TerminalData = C.GHOSTTY_TERMINAL_DATA_SELECTION
+
+	// TerminalDataViewportActive indicates whether the viewport is pinned
+	// to the active terminal area rather than scrolled into history (bool).
+	TerminalDataViewportActive TerminalData = C.GHOSTTY_TERMINAL_DATA_VIEWPORT_ACTIVE
 )
 
 // ActiveScreen returns which screen buffer is currently active.
@@ -413,6 +417,16 @@ func (t *Terminal) TotalRows() (uint, error) {
 		return 0, err
 	}
 	return uint(v), nil
+}
+
+// ViewportActive reports whether the viewport is pinned to the active
+// terminal area. It returns false when the user has scrolled into history.
+func (t *Terminal) ViewportActive() (bool, error) {
+	var v C.bool
+	if err := resultError(C.ghostty_terminal_get(t.ptr, C.GHOSTTY_TERMINAL_DATA_VIEWPORT_ACTIVE, unsafe.Pointer(&v))); err != nil {
+		return false, err
+	}
+	return bool(v), nil
 }
 
 // WidthPx returns the total terminal width in pixels
