@@ -200,8 +200,8 @@ func TestRenderStateRowCellsStyle(t *testing.T) {
 	}
 	defer term.Close()
 
-	// Write bold text.
-	term.VTWrite([]byte("\x1b[1mX"))
+	// Write one bold cell and one default-styled cell.
+	term.VTWrite([]byte("\x1b[1mX\x1b[0mY"))
 
 	rs, err := NewRenderState()
 	if err != nil {
@@ -247,6 +247,94 @@ func TestRenderStateRowCellsStyle(t *testing.T) {
 	}
 	if !style.Bold() {
 		t.Fatal("expected bold style")
+	}
+
+	hasStyling, err := rc.HasStyling()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasStyling {
+		t.Fatal("expected first cell to have styling")
+	}
+
+	if !rc.Next() {
+		t.Fatal("expected second cell")
+	}
+	hasStyling, err = rc.HasStyling()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasStyling {
+		t.Fatal("expected second cell to have default styling")
+	}
+}
+
+func TestRenderStateRowCellsSelected(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	term.VTWrite([]byte("hello"))
+	start, err := term.GridRef(Point{Tag: PointTagActive, X: 1, Y: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	end, err := term.GridRef(Point{Tag: PointTagActive, X: 3, Y: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := term.SetSelection(&Selection{Start: *start, End: *end}); err != nil {
+		t.Fatal(err)
+	}
+
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+
+	if err := rs.Update(term); err != nil {
+		t.Fatal(err)
+	}
+
+	ri, err := NewRenderStateRowIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ri.Close()
+
+	if err := rs.RowIterator(ri); err != nil {
+		t.Fatal(err)
+	}
+
+	if !ri.Next() {
+		t.Fatal("expected at least one row")
+	}
+
+	rc, err := NewRenderStateRowCells()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+
+	if err := ri.Cells(rc); err != nil {
+		t.Fatal(err)
+	}
+
+	for x := uint16(0); x < 5; x++ {
+		if err := rc.Select(x); err != nil {
+			t.Fatal(err)
+		}
+		selected, err := rc.Selected()
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := x >= 1 && x <= 3
+		if selected != expected {
+			t.Fatalf("cell %d selected = %t, expected %t", x, selected, expected)
+		}
 	}
 }
 

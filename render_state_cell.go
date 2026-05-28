@@ -44,6 +44,14 @@ const (
 	// RenderStateRowCellsDataFgColor is the resolved foreground color of
 	// the cell (GhosttyColorRgb).
 	RenderStateRowCellsDataFgColor RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR
+
+	// RenderStateRowCellsDataSelected indicates whether the cell is contained
+	// within the current selection (bool).
+	RenderStateRowCellsDataSelected RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED
+
+	// RenderStateRowCellsDataHasStyling indicates whether the cell has any
+	// explicit styling (bool).
+	RenderStateRowCellsDataHasStyling RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_HAS_STYLING
 )
 
 // RenderStateRowCells iterates over cells in a render-state row.
@@ -206,4 +214,28 @@ func (rc *RenderStateRowCells) FgColor() (*ColorRGB, error) {
 	}
 	c := ColorRGB{R: uint8(v.r), G: uint8(v.g), B: uint8(v.b)}
 	return &c, nil
+}
+
+// Selected reports whether the current cell is contained within the
+// terminal selection snapshot that was current when the render state
+// was updated. Rendering policy for selected cells is left to the
+// caller.
+func (rc *RenderStateRowCells) Selected() (bool, error) {
+	var v C.bool
+	if err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_SELECTED, unsafe.Pointer(&v))); err != nil {
+		return false, err
+	}
+	return bool(v), nil
+}
+
+// HasStyling reports whether the current cell has any explicit styling.
+// This is equivalent to querying the raw Cell's HasStyling value, but
+// avoids materializing the raw cell when renderers only need to know
+// whether fetching the full style is necessary.
+func (rc *RenderStateRowCells) HasStyling() (bool, error) {
+	var v C.bool
+	if err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_HAS_STYLING, unsafe.Pointer(&v))); err != nil {
+		return false, err
+	}
+	return bool(v), nil
 }

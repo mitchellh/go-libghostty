@@ -2,8 +2,6 @@
 
 ## Not Bound
 
-- [x] Key encoding (`key.h`, `key/encoder.h`, `key/event.h`)
-- [x] Mouse encoding (`mouse.h`, `mouse/encoder.h`, `mouse/event.h`)
 - [ ] OSC parser (`osc.h`)
   - `ghostty_osc_new()`
   - `ghostty_osc_free()`
@@ -22,14 +20,6 @@
   - `ghostty_sgr_unknown_partial()`
   - `ghostty_sgr_attribute_tag()`
   - `ghostty_sgr_attribute_value()`
-- [x] Paste utilities (`paste.h`)
-- [x] Focus encoding (`focus.h`)
-- [x] Kitty graphics (`kitty_graphics.h`)
-- [x] Allocator (`allocator.h` — `ghostty_alloc`, `ghostty_free`)
-- [x] Terminal selection helpers (`selection.h`)
-- [x] Selection gesture APIs (`selection.h`)
-- [x] Render-state row selection (`GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION`)
-- [x] Build info (`build_info.h`)
 
 ## WASM-only Not Bound
 
