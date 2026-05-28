@@ -26,61 +26,74 @@ typedef struct {
 	bool inverse;
 } render_cell_style_snapshot;
 
-static inline GhosttyResult render_cell_style_snapshot_get(
-	GhosttyRenderStateRowCells cells,
-	render_cell_style_snapshot* out
-) {
-	if (out == NULL) return GHOSTTY_INVALID_VALUE;
+typedef struct {
+	GhosttyResult result;
+	render_cell_style_snapshot style;
+} render_cell_style_snapshot_result;
 
-	*out = (render_cell_style_snapshot){0};
+static inline render_cell_style_snapshot_result render_cell_style_snapshot_get(
+	GhosttyRenderStateRowCells cells
+) {
+	render_cell_style_snapshot_result out = {
+		.result = GHOSTTY_SUCCESS,
+		.style = {0},
+	};
 
 	GhosttyResult result = ghostty_render_state_row_cells_get(
 		cells,
 		GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_HAS_STYLING,
-		&out->has_styling
+		&out.style.has_styling
 	);
-	if (result != GHOSTTY_SUCCESS) return result;
+	if (result != GHOSTTY_SUCCESS) {
+		out.result = result;
+		return out;
+	}
 
-	if (out->has_styling) {
+	if (out.style.has_styling) {
 		GhosttyStyle style = GHOSTTY_INIT_SIZED(GhosttyStyle);
 		result = ghostty_render_state_row_cells_get(
 			cells,
 			GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE,
 			&style
 		);
-		if (result != GHOSTTY_SUCCESS) return result;
+		if (result != GHOSTTY_SUCCESS) {
+			out.result = result;
+			return out;
+		}
 
-		out->bold = style.bold;
-		out->faint = style.faint;
-		out->italic = style.italic;
-		out->underline = style.underline != GHOSTTY_SGR_UNDERLINE_NONE;
-		out->strikethrough = style.strikethrough;
-		out->inverse = style.inverse;
+		out.style.bold = style.bold;
+		out.style.faint = style.faint;
+		out.style.italic = style.italic;
+		out.style.underline = style.underline != GHOSTTY_SGR_UNDERLINE_NONE;
+		out.style.strikethrough = style.strikethrough;
+		out.style.inverse = style.inverse;
 	}
 
 	result = ghostty_render_state_row_cells_get(
 		cells,
 		GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR,
-		&out->foreground
+		&out.style.foreground
 	);
 	if (result == GHOSTTY_SUCCESS) {
-		out->has_foreground = true;
+		out.style.has_foreground = true;
 	} else if (result != GHOSTTY_INVALID_VALUE) {
-		return result;
+		out.result = result;
+		return out;
 	}
 
 	result = ghostty_render_state_row_cells_get(
 		cells,
 		GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR,
-		&out->background
+		&out.style.background
 	);
 	if (result == GHOSTTY_SUCCESS) {
-		out->has_background = true;
+		out.style.has_background = true;
 	} else if (result != GHOSTTY_INVALID_VALUE) {
-		return result;
+		out.result = result;
+		return out;
 	}
 
-	return GHOSTTY_SUCCESS;
+	return out;
 }
 */
 import "C"
@@ -136,20 +149,20 @@ const (
 // render-state cell. It corresponds to the data returned by
 // ghostty_render_state_row_cells_get for style, foreground color, background
 // color, and has-styling, flattened into one Go value for hot render paths.
-//
-// Foreground and Background point at storage owned by this struct when set and
-// are nil when the cell has no explicit/resolved color. Because those pointers
-// target internal fields, callers should not copy a RenderCellStyle value after
-// calling [RenderStateRowCells.ResolvedStyleInto]; pass the same value by
-// pointer and reuse it instead.
 type RenderCellStyle struct {
-	// Foreground is the resolved foreground color, or nil when the cell has no
-	// explicit foreground and the renderer should use its default foreground.
-	Foreground *ColorRGB
+	// Foreground is the resolved foreground color when HasForeground is true.
+	Foreground ColorRGB
 
-	// Background is the resolved background color, or nil when the cell has no
-	// explicit background and the renderer should use its default background.
-	Background *ColorRGB
+	// Background is the resolved background color when HasBackground is true.
+	Background ColorRGB
+
+	// HasForeground reports whether Foreground contains a resolved foreground
+	// color. When false, the renderer should use its default foreground.
+	HasForeground bool
+
+	// HasBackground reports whether Background contains a resolved background
+	// color. When false, the renderer should use its default background.
+	HasBackground bool
 
 	// HasStyling reports whether the cell has any explicit non-default styling.
 	HasStyling bool
@@ -171,9 +184,6 @@ type RenderCellStyle struct {
 
 	// Inverse reports whether inverse video is set.
 	Inverse bool
-
-	foreground ColorRGB
-	background ColorRGB
 }
 
 // RenderStateRowCells iterates over cells in a render-state row.
@@ -283,47 +293,32 @@ func (rc *RenderStateRowCells) Style() (*Style, error) {
 }
 
 // StyleInto fills dst with the reusable resolved style snapshot for the current
-// cell. It is an alias for [RenderStateRowCells.ResolvedStyleInto].
-func (rc *RenderStateRowCells) StyleInto(dst *RenderCellStyle) error {
-	return rc.ResolvedStyleInto(dst)
-}
-
-// ResolvedStyleInto fills dst with the current cell's resolved colors and text
-// style flags. This is the allocation-reusing form of querying Style, FgColor,
+// cell. This is the allocation-reusing form of querying Style, FgColor,
 // BgColor, and HasStyling separately: it performs one cgo transition, stores
-// colors in dst-owned memory, and sets Foreground/Background to nil when the
-// corresponding color is absent.
-func (rc *RenderStateRowCells) ResolvedStyleInto(dst *RenderCellStyle) error {
+// colors as values, and sets HasForeground/HasBackground when the corresponding
+// color is present.
+func (rc *RenderStateRowCells) StyleInto(dst *RenderCellStyle) error {
 	if dst == nil {
 		return errors.New("libghostty: nil RenderCellStyle")
 	}
 
-	var snap C.render_cell_style_snapshot
-	if err := resultError(C.render_cell_style_snapshot_get(rc.ptr, &snap)); err != nil {
+	result := C.render_cell_style_snapshot_get(rc.ptr)
+	if err := resultError(result.result); err != nil {
 		return err
 	}
 
+	snap := result.style
 	dst.HasStyling = bool(snap.has_styling)
+	dst.HasForeground = bool(snap.has_foreground)
+	dst.HasBackground = bool(snap.has_background)
+	dst.Foreground = ColorRGB{R: uint8(snap.foreground.r), G: uint8(snap.foreground.g), B: uint8(snap.foreground.b)}
+	dst.Background = ColorRGB{R: uint8(snap.background.r), G: uint8(snap.background.g), B: uint8(snap.background.b)}
 	dst.Bold = bool(snap.bold)
 	dst.Faint = bool(snap.faint)
 	dst.Italic = bool(snap.italic)
 	dst.Underline = bool(snap.underline)
 	dst.Strikethrough = bool(snap.strikethrough)
 	dst.Inverse = bool(snap.inverse)
-
-	if bool(snap.has_foreground) {
-		dst.foreground = ColorRGB{R: uint8(snap.foreground.r), G: uint8(snap.foreground.g), B: uint8(snap.foreground.b)}
-		dst.Foreground = &dst.foreground
-	} else {
-		dst.Foreground = nil
-	}
-
-	if bool(snap.has_background) {
-		dst.background = ColorRGB{R: uint8(snap.background.r), G: uint8(snap.background.g), B: uint8(snap.background.b)}
-		dst.Background = &dst.background
-	} else {
-		dst.Background = nil
-	}
 
 	return nil
 }
