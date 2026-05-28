@@ -97,116 +97,33 @@ static inline render_cell_style_snapshot_result render_cell_style_snapshot_get(
 }
 
 // render_cell_graphemes_utf8_result is returned by value so the Go binding
-// doesn't need to pass Go out-parameters through cgo for the hot per-cell text
-// path. The current upstream API exposes grapheme extraction as a length query
-// plus a codepoint-buffer query; using that directly from Go forces the length
-// and any small Go scratch array to escape to the heap. Keeping both the length
-// and the common small codepoint scratch in C avoids those per-cell heap
-// allocations while preserving the upstream API's behavior.
+// doesn't need to pass a Go GhosttyBuffer out-parameter through cgo for the hot
+// per-cell text path. The upstream getter owns the grapheme extraction and UTF-8
+// encoding behavior; this helper only keeps the output struct on the C stack so
+// Go receives the result metadata by value.
 typedef struct {
 	GhosttyResult result;
-	size_t written;
-	size_t needed;
+	size_t len;
 } render_cell_graphemes_utf8_result;
-
-static inline uint32_t render_cell_utf8_valid(uint32_t cp) {
-	if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
-		return 0xFFFD;
-	}
-	return cp;
-}
-
-static inline size_t render_cell_utf8_len(uint32_t cp) {
-	cp = render_cell_utf8_valid(cp);
-	if (cp < 0x80) return 1;
-	if (cp < 0x800) return 2;
-	if (cp < 0x10000) return 3;
-	return 4;
-}
-
-static inline size_t render_cell_utf8_write(uint8_t* dst, uint32_t cp) {
-	cp = render_cell_utf8_valid(cp);
-	if (cp < 0x80) {
-		dst[0] = (uint8_t)cp;
-		return 1;
-	}
-	if (cp < 0x800) {
-		dst[0] = (uint8_t)(0xC0 | (cp >> 6));
-		dst[1] = (uint8_t)(0x80 | (cp & 0x3F));
-		return 2;
-	}
-	if (cp < 0x10000) {
-		dst[0] = (uint8_t)(0xE0 | (cp >> 12));
-		dst[1] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F));
-		dst[2] = (uint8_t)(0x80 | (cp & 0x3F));
-		return 3;
-	}
-	dst[0] = (uint8_t)(0xF0 | (cp >> 18));
-	dst[1] = (uint8_t)(0x80 | ((cp >> 12) & 0x3F));
-	dst[2] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F));
-	dst[3] = (uint8_t)(0x80 | (cp & 0x3F));
-	return 4;
-}
 
 static inline render_cell_graphemes_utf8_result render_cell_graphemes_utf8_append(
 	GhosttyRenderStateRowCells cells,
 	uint8_t* dst,
 	size_t dst_len
 ) {
-	render_cell_graphemes_utf8_result out = {
-		.result = GHOSTTY_SUCCESS,
-		.written = 0,
-		.needed = 0,
+	GhosttyBuffer buf = {
+		.ptr = dst,
+		.cap = dst_len,
+		.len = 0,
 	};
-
-	uint32_t n = 0;
-	GhosttyResult result = ghostty_render_state_row_cells_get(
-		cells,
-		GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN,
-		&n
-	);
-	if (result != GHOSTTY_SUCCESS || n == 0) {
-		out.result = result;
-		return out;
-	}
-
-	uint32_t small[8];
-	uint32_t* graphemes = small;
-	size_t graphemes_size = sizeof(uint32_t) * (size_t)n;
-	if (n > 8) {
-		graphemes = (uint32_t*)ghostty_alloc(NULL, graphemes_size);
-		if (graphemes == NULL) {
-			out.result = GHOSTTY_OUT_OF_MEMORY;
-			return out;
-		}
-	}
-
-	result = ghostty_render_state_row_cells_get(
-		cells,
-		GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF,
-		graphemes
-	);
-	if (result != GHOSTTY_SUCCESS) {
-		if (graphemes != small) ghostty_free(NULL, (uint8_t*)graphemes, graphemes_size);
-		out.result = result;
-		return out;
-	}
-
-	for (uint32_t i = 0; i < n; i++) {
-		out.needed += render_cell_utf8_len(graphemes[i]);
-	}
-	if (out.needed > dst_len) {
-		if (graphemes != small) ghostty_free(NULL, (uint8_t*)graphemes, graphemes_size);
-		out.result = GHOSTTY_OUT_OF_SPACE;
-		return out;
-	}
-
-	for (uint32_t i = 0; i < n; i++) {
-		out.written += render_cell_utf8_write(dst + out.written, graphemes[i]);
-	}
-
-	if (graphemes != small) ghostty_free(NULL, (uint8_t*)graphemes, graphemes_size);
-	return out;
+	return (render_cell_graphemes_utf8_result) {
+		.result = ghostty_render_state_row_cells_get(
+			cells,
+			GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8,
+			&buf
+		),
+		.len = buf.len,
+	};
 }
 */
 import "C"
@@ -255,6 +172,10 @@ const (
 	// RenderStateRowCellsDataHasStyling indicates whether the cell has any
 	// explicit styling (bool).
 	RenderStateRowCellsDataHasStyling RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_HAS_STYLING
+
+	// RenderStateRowCellsDataGraphemesUTF8 encodes the current cell's full
+	// grapheme cluster as UTF-8 into a caller-provided GhosttyBuffer.
+	RenderStateRowCellsDataGraphemesUTF8 RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8
 )
 
 // RenderCellStyle is a reusable, resolved style snapshot for the current
@@ -488,9 +409,9 @@ func (rc *RenderStateRowCells) GraphemesInto(dst []uint32) ([]uint32, error) {
 //
 // This is intended for renderers and text extractors that ultimately need
 // bytes or strings and want to avoid allocating a temporary codepoint slice
-// and per-cell string. The common case of a short grapheme cluster uses C
-// stack storage for codepoints, avoiding cgo-induced escapes of Go scratch
-// values; unusually long clusters allocate temporary C memory for that call.
+// and per-cell string. The upstream UTF-8 getter keeps grapheme scratch storage
+// on the C side, avoiding cgo-induced escapes of Go scratch values in hot
+// render loops.
 func (rc *RenderStateRowCells) AppendGraphemes(dst []byte) ([]byte, error) {
 	oldLen := len(dst)
 	for {
@@ -504,9 +425,9 @@ func (rc *RenderStateRowCells) AppendGraphemes(dst []byte) ([]byte, error) {
 		result := C.render_cell_graphemes_utf8_append(rc.ptr, ptr, C.size_t(available))
 		switch result.result {
 		case C.GHOSTTY_SUCCESS:
-			return dst[:oldLen+int(result.written)], nil
+			return dst[:oldLen+int(result.len)], nil
 		case C.GHOSTTY_OUT_OF_SPACE:
-			needed := int(result.needed)
+			needed := int(result.len)
 			if needed <= available {
 				return dst, resultError(result.result)
 			}
