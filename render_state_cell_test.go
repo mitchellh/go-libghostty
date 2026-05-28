@@ -193,6 +193,73 @@ func TestRenderStateRowCellsGraphemes(t *testing.T) {
 	}
 }
 
+func TestRenderStateRowCellsGraphemesInto(t *testing.T) {
+	rc := testRenderStateRowCells(t, "ABC")
+
+	// Select column 1 (should be 'B') and append it into caller-owned scratch
+	// that already has content. This verifies append semantics and lets callers
+	// reuse the same backing array by passing scratch[:0].
+	if err := rc.Select(1); err != nil {
+		t.Fatal(err)
+	}
+	scratch := make([]uint32, 1, 4)
+	scratch[0] = 'A'
+	base := &scratch[0]
+	graphemes, err := rc.GraphemesInto(scratch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graphemes) != 2 || graphemes[0] != 'A' || graphemes[1] != 'B' {
+		t.Fatalf("expected ['A', 'B'], got %v", graphemes)
+	}
+	if &graphemes[0] != base {
+		t.Fatal("expected GraphemesInto to reuse caller-provided capacity")
+	}
+
+	// Empty cells append nothing and return the same slice unchanged.
+	if err := rc.Select(3); err != nil {
+		t.Fatal(err)
+	}
+	graphemes, err = rc.GraphemesInto(graphemes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graphemes) != 2 || graphemes[0] != 'A' || graphemes[1] != 'B' {
+		t.Fatalf("expected empty cell to leave graphemes unchanged, got %v", graphemes)
+	}
+}
+
+func TestRenderStateRowCellsAppendGraphemes(t *testing.T) {
+	rc := testRenderStateRowCells(t, "Aé")
+
+	var text []byte
+	for x := uint16(0); x < 2; x++ {
+		if err := rc.Select(x); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		text, err = rc.AppendGraphemes(text)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if string(text) != "Aé" {
+		t.Fatalf("expected %q, got %q", "Aé", string(text))
+	}
+
+	// Empty cells append nothing and preserve the existing byte buffer content.
+	if err := rc.Select(2); err != nil {
+		t.Fatal(err)
+	}
+	text, err := rc.AppendGraphemes(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(text) != "Aé" {
+		t.Fatalf("expected empty cell to leave text unchanged, got %q", string(text))
+	}
+}
+
 func TestRenderStateRowCellsStyle(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {
@@ -419,4 +486,52 @@ func TestRenderStateRowCellsColors(t *testing.T) {
 	if fg != nil {
 		t.Fatalf("expected nil fg for unstyled cell, got %+v", *fg)
 	}
+}
+
+func testRenderStateRowCells(t *testing.T, text string) *RenderStateRowCells {
+	t.Helper()
+
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(term.Close)
+
+	term.VTWrite([]byte(text))
+
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rs.Close)
+
+	if err := rs.Update(term); err != nil {
+		t.Fatal(err)
+	}
+
+	ri, err := NewRenderStateRowIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ri.Close)
+
+	if err := rs.RowIterator(ri); err != nil {
+		t.Fatal(err)
+	}
+
+	if !ri.Next() {
+		t.Fatal("expected at least one row")
+	}
+
+	rc, err := NewRenderStateRowCells()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rc.Close)
+
+	if err := ri.Cells(rc); err != nil {
+		t.Fatal(err)
+	}
+
+	return rc
 }

@@ -10,6 +10,7 @@ import "C"
 
 import (
 	"errors"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -164,21 +165,90 @@ func (rc *RenderStateRowCells) Style() (*Style, error) {
 // current cell. The base codepoint is first, followed by any extra
 // codepoints. Returns nil if the cell has no text.
 func (rc *RenderStateRowCells) Graphemes() ([]uint32, error) {
+	graphemes, err := rc.GraphemesInto(nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(graphemes) == 0 {
+		return nil, nil
+	}
+	return graphemes, nil
+}
+
+// GraphemesInto appends the full grapheme cluster codepoints for the
+// current cell to dst and returns the extended slice. The base codepoint
+// is appended first, followed by any extra codepoints. If the cell has no
+// text, dst is returned unchanged.
+//
+// This is the allocation-reusing form of [RenderStateRowCells.Graphemes].
+// Callers that want a per-cell scratch buffer should pass scratch[:0].
+func (rc *RenderStateRowCells) GraphemesInto(dst []uint32) ([]uint32, error) {
 	// Get the number of codepoints.
 	var n C.uint32_t
 	if err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN, unsafe.Pointer(&n))); err != nil {
-		return nil, err
+		return dst, err
 	}
 	if n == 0 {
-		return nil, nil
+		return dst, nil
 	}
 
-	// Read codepoints into a buffer.
-	buf := make([]uint32, uint32(n))
-	if err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, unsafe.Pointer(&buf[0]))); err != nil {
-		return nil, err
+	// Read codepoints into the newly appended portion of the caller's buffer.
+	oldLen := len(dst)
+	newLen := oldLen + int(n)
+	if newLen <= cap(dst) {
+		dst = dst[:newLen]
+	} else {
+		grown := make([]uint32, newLen)
+		copy(grown, dst)
+		dst = grown
 	}
-	return buf, nil
+	if err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, unsafe.Pointer(&dst[oldLen]))); err != nil {
+		return dst[:oldLen], err
+	}
+	return dst, nil
+}
+
+// AppendGraphemes appends the current cell's grapheme cluster encoded as
+// UTF-8 to dst and returns the extended byte slice. If the cell has no text,
+// dst is returned unchanged.
+//
+// This is intended for renderers and text extractors that ultimately need
+// bytes or strings and want to avoid allocating a temporary codepoint slice
+// and per-cell string. The common case of a short grapheme cluster uses stack
+// storage for codepoints; unusually long clusters allocate a temporary slice.
+func (rc *RenderStateRowCells) AppendGraphemes(dst []byte) ([]byte, error) {
+	// Get the number of codepoints so we can avoid a heap allocation for the
+	// common one-codepoint ASCII case while still preserving full graphemes.
+	var n C.uint32_t
+	if err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN, unsafe.Pointer(&n))); err != nil {
+		return dst, err
+	}
+	if n == 0 {
+		return dst, nil
+	}
+
+	// Most cells are a single codepoint. Keep a small stack buffer so appending
+	// text for normal terminal output doesn't require allocating []uint32.
+	var small [8]uint32
+	var graphemes []uint32
+	if int(n) <= len(small) {
+		graphemes = small[:int(n)]
+	} else {
+		graphemes = make([]uint32, int(n))
+	}
+
+	if err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, unsafe.Pointer(&graphemes[0]))); err != nil {
+		return dst, err
+	}
+
+	for _, cp := range graphemes {
+		if cp < utf8.RuneSelf {
+			dst = append(dst, byte(cp))
+			continue
+		}
+		dst = utf8.AppendRune(dst, rune(cp))
+	}
+	return dst, nil
 }
 
 // BgColor returns the resolved background color for the current cell.
