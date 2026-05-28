@@ -5,6 +5,83 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
+
+// render_cell_style_snapshot is a small binding-side adapter over the current
+// libghostty render-cell APIs. The upstream API exposes each style/color field
+// separately, which is flexible but expensive for renderers because each Go
+// getter is a cgo transition and the allocation-returning Go getters materialize
+// *Style / *ColorRGB values. This helper keeps the same libghostty behavior but
+// batches the fields into one cgo call and a caller-owned result struct.
+typedef struct {
+	bool has_styling;
+	bool has_foreground;
+	GhosttyColorRgb foreground;
+	bool has_background;
+	GhosttyColorRgb background;
+	bool bold;
+	bool faint;
+	bool italic;
+	bool underline;
+	bool strikethrough;
+	bool inverse;
+} render_cell_style_snapshot;
+
+static inline GhosttyResult render_cell_style_snapshot_get(
+	GhosttyRenderStateRowCells cells,
+	render_cell_style_snapshot* out
+) {
+	if (out == NULL) return GHOSTTY_INVALID_VALUE;
+
+	*out = (render_cell_style_snapshot){0};
+
+	GhosttyResult result = ghostty_render_state_row_cells_get(
+		cells,
+		GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_HAS_STYLING,
+		&out->has_styling
+	);
+	if (result != GHOSTTY_SUCCESS) return result;
+
+	if (out->has_styling) {
+		GhosttyStyle style = GHOSTTY_INIT_SIZED(GhosttyStyle);
+		result = ghostty_render_state_row_cells_get(
+			cells,
+			GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE,
+			&style
+		);
+		if (result != GHOSTTY_SUCCESS) return result;
+
+		out->bold = style.bold;
+		out->faint = style.faint;
+		out->italic = style.italic;
+		out->underline = style.underline != GHOSTTY_SGR_UNDERLINE_NONE;
+		out->strikethrough = style.strikethrough;
+		out->inverse = style.inverse;
+	}
+
+	result = ghostty_render_state_row_cells_get(
+		cells,
+		GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR,
+		&out->foreground
+	);
+	if (result == GHOSTTY_SUCCESS) {
+		out->has_foreground = true;
+	} else if (result != GHOSTTY_INVALID_VALUE) {
+		return result;
+	}
+
+	result = ghostty_render_state_row_cells_get(
+		cells,
+		GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR,
+		&out->background
+	);
+	if (result == GHOSTTY_SUCCESS) {
+		out->has_background = true;
+	} else if (result != GHOSTTY_INVALID_VALUE) {
+		return result;
+	}
+
+	return GHOSTTY_SUCCESS;
+}
 */
 import "C"
 
@@ -54,6 +131,50 @@ const (
 	// explicit styling (bool).
 	RenderStateRowCellsDataHasStyling RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_HAS_STYLING
 )
+
+// RenderCellStyle is a reusable, resolved style snapshot for the current
+// render-state cell. It corresponds to the data returned by
+// ghostty_render_state_row_cells_get for style, foreground color, background
+// color, and has-styling, flattened into one Go value for hot render paths.
+//
+// Foreground and Background point at storage owned by this struct when set and
+// are nil when the cell has no explicit/resolved color. Because those pointers
+// target internal fields, callers should not copy a RenderCellStyle value after
+// calling [RenderStateRowCells.ResolvedStyleInto]; pass the same value by
+// pointer and reuse it instead.
+type RenderCellStyle struct {
+	// Foreground is the resolved foreground color, or nil when the cell has no
+	// explicit foreground and the renderer should use its default foreground.
+	Foreground *ColorRGB
+
+	// Background is the resolved background color, or nil when the cell has no
+	// explicit background and the renderer should use its default background.
+	Background *ColorRGB
+
+	// HasStyling reports whether the cell has any explicit non-default styling.
+	HasStyling bool
+
+	// Bold reports whether bold text is set.
+	Bold bool
+
+	// Faint reports whether faint/dim text is set.
+	Faint bool
+
+	// Italic reports whether italic text is set.
+	Italic bool
+
+	// Underline reports whether any underline style is set.
+	Underline bool
+
+	// Strikethrough reports whether strikethrough text is set.
+	Strikethrough bool
+
+	// Inverse reports whether inverse video is set.
+	Inverse bool
+
+	foreground ColorRGB
+	background ColorRGB
+}
 
 // RenderStateRowCells iterates over cells in a render-state row.
 // Create one with NewRenderStateRowCells, populate it via
@@ -159,6 +280,52 @@ func (rc *RenderStateRowCells) Style() (*Style, error) {
 		return nil, err
 	}
 	return &Style{c: cs}, nil
+}
+
+// StyleInto fills dst with the reusable resolved style snapshot for the current
+// cell. It is an alias for [RenderStateRowCells.ResolvedStyleInto].
+func (rc *RenderStateRowCells) StyleInto(dst *RenderCellStyle) error {
+	return rc.ResolvedStyleInto(dst)
+}
+
+// ResolvedStyleInto fills dst with the current cell's resolved colors and text
+// style flags. This is the allocation-reusing form of querying Style, FgColor,
+// BgColor, and HasStyling separately: it performs one cgo transition, stores
+// colors in dst-owned memory, and sets Foreground/Background to nil when the
+// corresponding color is absent.
+func (rc *RenderStateRowCells) ResolvedStyleInto(dst *RenderCellStyle) error {
+	if dst == nil {
+		return errors.New("libghostty: nil RenderCellStyle")
+	}
+
+	var snap C.render_cell_style_snapshot
+	if err := resultError(C.render_cell_style_snapshot_get(rc.ptr, &snap)); err != nil {
+		return err
+	}
+
+	dst.HasStyling = bool(snap.has_styling)
+	dst.Bold = bool(snap.bold)
+	dst.Faint = bool(snap.faint)
+	dst.Italic = bool(snap.italic)
+	dst.Underline = bool(snap.underline)
+	dst.Strikethrough = bool(snap.strikethrough)
+	dst.Inverse = bool(snap.inverse)
+
+	if bool(snap.has_foreground) {
+		dst.foreground = ColorRGB{R: uint8(snap.foreground.r), G: uint8(snap.foreground.g), B: uint8(snap.foreground.b)}
+		dst.Foreground = &dst.foreground
+	} else {
+		dst.Foreground = nil
+	}
+
+	if bool(snap.has_background) {
+		dst.background = ColorRGB{R: uint8(snap.background.r), G: uint8(snap.background.g), B: uint8(snap.background.b)}
+		dst.Background = &dst.background
+	} else {
+		dst.Background = nil
+	}
+
+	return nil
 }
 
 // Graphemes returns the full grapheme cluster codepoints for the

@@ -336,6 +336,108 @@ func TestRenderStateRowCellsStyle(t *testing.T) {
 	}
 }
 
+func TestRenderStateRowCellsResolvedStyleInto(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// Write one heavily styled cell and one default-styled cell. The styled
+	// cell exercises the resolved RGB color path as well as the style flags Rex
+	// needs to produce ANSI output without allocating per-cell Style/Color values.
+	term.VTWrite([]byte("\x1b[1;2;3;4;7;9;38;2;255;0;0;48;2;0;0;255mX\x1b[0mY"))
+
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+
+	if err := rs.Update(term); err != nil {
+		t.Fatal(err)
+	}
+
+	ri, err := NewRenderStateRowIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ri.Close()
+
+	if err := rs.RowIterator(ri); err != nil {
+		t.Fatal(err)
+	}
+
+	if !ri.Next() {
+		t.Fatal("expected at least one row")
+	}
+
+	rc, err := NewRenderStateRowCells()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+
+	if err := ri.Cells(rc); err != nil {
+		t.Fatal(err)
+	}
+
+	if !rc.Next() {
+		t.Fatal("expected at least one cell")
+	}
+
+	var style RenderCellStyle
+	if err := rc.ResolvedStyleInto(&style); err != nil {
+		t.Fatal(err)
+	}
+	if !style.HasStyling {
+		t.Fatal("expected first cell to have styling")
+	}
+	if style.Foreground == nil || *style.Foreground != (ColorRGB{R: 255, G: 0, B: 0}) {
+		t.Fatalf("expected red foreground, got %#v", style.Foreground)
+	}
+	if style.Background == nil || *style.Background != (ColorRGB{R: 0, G: 0, B: 255}) {
+		t.Fatalf("expected blue background, got %#v", style.Background)
+	}
+	if !style.Bold || !style.Faint || !style.Italic || !style.Underline || !style.Strikethrough || !style.Inverse {
+		t.Fatalf("expected all style flags to be set, got %+v", style)
+	}
+	fgPtr := style.Foreground
+	bgPtr := style.Background
+
+	if !rc.Next() {
+		t.Fatal("expected second cell")
+	}
+	if err := rc.ResolvedStyleInto(&style); err != nil {
+		t.Fatal(err)
+	}
+	if style.HasStyling {
+		t.Fatal("expected second cell to have default styling")
+	}
+	if style.Foreground != nil {
+		t.Fatalf("expected nil foreground for default-styled cell, got %+v", *style.Foreground)
+	}
+	if style.Background != nil {
+		t.Fatalf("expected nil background for default-styled cell, got %+v", *style.Background)
+	}
+	if style.Bold || style.Faint || style.Italic || style.Underline || style.Strikethrough || style.Inverse {
+		t.Fatalf("expected all style flags to be cleared, got %+v", style)
+	}
+
+	if err := rc.Select(0); err != nil {
+		t.Fatal(err)
+	}
+	if err := rc.StyleInto(&style); err != nil {
+		t.Fatal(err)
+	}
+	if style.Foreground != fgPtr {
+		t.Fatal("expected foreground pointer storage to be reused")
+	}
+	if style.Background != bgPtr {
+		t.Fatal("expected background pointer storage to be reused")
+	}
+}
+
 func TestRenderStateRowCellsSelected(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {
