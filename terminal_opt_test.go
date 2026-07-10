@@ -1,6 +1,9 @@
 package libghostty
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestTerminalSetTitle(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
@@ -136,6 +139,106 @@ func TestTerminalSetEffectBell(t *testing.T) {
 	term.VTWrite([]byte("\x07"))
 	if bellCount != 1 {
 		t.Fatalf("expected still 1 bell after clearing, got %d", bellCount)
+	}
+}
+
+func TestTerminalWithClipboardWrite(t *testing.T) {
+	var writes []ClipboardWrite
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithClipboardWrite(func(_ *Terminal, write ClipboardWrite) ClipboardWriteResult {
+			writes = append(writes, write)
+			return ClipboardWriteDenied
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// OSC 52 is decoded before the effect runs, including binary data and
+	// sequences split across multiple writes.
+	term.VTWrite([]byte("\x1b]52;c;aGVs"))
+	term.VTWrite([]byte("bG8Ad29ybGQ=\x1b\\"))
+	if len(writes) != 1 {
+		t.Fatalf("expected 1 clipboard write, got %d", len(writes))
+	}
+	if got := writes[0].Location; got != ClipboardLocationStandard {
+		t.Fatalf("expected standard clipboard, got %d", got)
+	}
+	if got := len(writes[0].Contents); got != 1 {
+		t.Fatalf("expected 1 clipboard representation, got %d", got)
+	}
+	content := writes[0].Contents[0]
+	if got := content.MIME; got != "text/plain" {
+		t.Fatalf("expected text/plain MIME type, got %q", got)
+	}
+	if want := []byte("hello\x00world"); !bytes.Equal(content.Data, want) {
+		t.Fatalf("expected clipboard data %q, got %q", want, content.Data)
+	}
+
+	// An empty content list is a clear, while the normalized destination is
+	// still preserved.
+	term.VTWrite([]byte("\x1b]52;s;\x1b\\"))
+	if len(writes) != 2 {
+		t.Fatalf("expected 2 clipboard writes, got %d", len(writes))
+	}
+	if got := writes[1].Location; got != ClipboardLocationSelection {
+		t.Fatalf("expected selection clipboard, got %d", got)
+	}
+	if got := len(writes[1].Contents); got != 0 {
+		t.Fatalf("expected a clipboard clear, got %d representations", got)
+	}
+
+	// iTerm2 Copy uses the same protocol-neutral callback shape.
+	term.VTWrite([]byte("\x1b]1337;Copy=:aVRlcm0=\x1b\\"))
+	if len(writes) != 3 {
+		t.Fatalf("expected 3 clipboard writes, got %d", len(writes))
+	}
+	if got := writes[2].Contents[0].Data; !bytes.Equal(got, []byte("iTerm")) {
+		t.Fatalf("expected decoded iTerm2 data, got %q", got)
+	}
+
+	// Clipboard reads and malformed payloads are intentionally ignored.
+	term.VTWrite([]byte("\x1b]52;c;?\x1b\\"))
+	term.VTWrite([]byte("\x1b]52;c;%%%\x1b\\"))
+	if len(writes) != 3 {
+		t.Fatalf("expected ignored reads and malformed data, got %d writes", len(writes))
+	}
+
+	// Callback data is copied into Go memory and remains valid after later
+	// terminal writes have reused libghostty's borrowed descriptors.
+	if want := []byte("hello\x00world"); !bytes.Equal(writes[0].Contents[0].Data, want) {
+		t.Fatalf("expected retained clipboard data %q, got %q", want, writes[0].Contents[0].Data)
+	}
+}
+
+func TestTerminalSetEffectClipboardWrite(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	var writes int
+	term.SetEffectClipboardWrite(func(_ *Terminal, write ClipboardWrite) ClipboardWriteResult {
+		writes++
+		if write.Location != ClipboardLocationPrimary {
+			t.Errorf("expected primary clipboard, got %d", write.Location)
+		}
+		return ClipboardWriteSuccess
+	})
+
+	term.VTWrite([]byte("\x1b]52;p;eA==\x1b\\"))
+	if writes != 1 {
+		t.Fatalf("expected 1 clipboard write, got %d", writes)
+	}
+
+	// Clearing the callback takes effect immediately.
+	term.SetEffectClipboardWrite(nil)
+	term.VTWrite([]byte("\x1b]52;p;eA==\x1b\\"))
+	if writes != 1 {
+		t.Fatalf("expected still 1 clipboard write after clearing, got %d", writes)
 	}
 }
 

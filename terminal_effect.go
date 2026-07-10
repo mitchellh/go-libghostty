@@ -14,6 +14,7 @@ package libghostty
 // addresses on the C side.
 extern void goWritePtyTrampoline(GhosttyTerminal, void*, uint8_t*, size_t);
 extern void goBellTrampoline(GhosttyTerminal, void*);
+extern GhosttyClipboardWriteResult goClipboardWriteTrampoline(GhosttyTerminal, void*, GhosttyClipboardWrite*);
 extern void goTitleChangedTrampoline(GhosttyTerminal, void*);
 extern GhosttyString goEnquiryTrampoline(GhosttyTerminal, void*);
 extern GhosttyString goXtversionTrampoline(GhosttyTerminal, void*);
@@ -29,6 +30,9 @@ static inline GhosttyResult set_write_pty(GhosttyTerminal t) {
 }
 static inline GhosttyResult set_bell(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_BELL, (const void*)goBellTrampoline);
+}
+static inline GhosttyResult set_clipboard_write(GhosttyTerminal t) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, (const void*)goClipboardWriteTrampoline);
 }
 static inline GhosttyResult set_title_changed(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_TITLE_CHANGED, (const void*)goTitleChangedTrampoline);
@@ -73,6 +77,11 @@ func (t *Terminal) syncEffects() {
 		C.set_bell(t.ptr)
 	} else {
 		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_BELL)
+	}
+	if t.onClipboardWrite != nil {
+		C.set_clipboard_write(t.ptr)
+	} else {
+		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE)
 	}
 	if t.onTitleChanged != nil {
 		C.set_title_changed(t.ptr)
@@ -125,6 +134,80 @@ func goBellTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer) {
 	if t.onBell != nil {
 		t.onBell(t)
 	}
+}
+
+//export goClipboardWriteTrampoline
+func goClipboardWriteTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer, write *C.GhosttyClipboardWrite) C.GhosttyClipboardWriteResult {
+	t := terminalFromUserdata(userdata)
+	if t.onClipboardWrite == nil {
+		return C.GHOSTTY_CLIPBOARD_WRITE_RESULT_UNSUPPORTED
+	}
+
+	// GhosttyClipboardWrite is a sized struct so newer libghostty versions
+	// can extend it without breaking existing callbacks. Only read the fields
+	// this binding knows about when the descriptor contains the full current
+	// layout.
+	if write == nil || write.size < C.size_t(C.sizeof_GhosttyClipboardWrite) {
+		return C.GHOSTTY_CLIPBOARD_WRITE_RESULT_INVALID_DATA
+	}
+
+	count, ok := clipboardSizeToInt(write.contents_len)
+	if !ok || (count > 0 && write.contents == nil) {
+		return C.GHOSTTY_CLIPBOARD_WRITE_RESULT_INVALID_DATA
+	}
+
+	contents := make([]ClipboardContent, count)
+	if count > 0 {
+		cContents := unsafe.Slice(write.contents, count)
+		for i, content := range cContents {
+			mime, valid := copyClipboardString(content.mime)
+			if !valid {
+				return C.GHOSTTY_CLIPBOARD_WRITE_RESULT_INVALID_DATA
+			}
+			data, valid := copyClipboardString(content.data)
+			if !valid {
+				return C.GHOSTTY_CLIPBOARD_WRITE_RESULT_INVALID_DATA
+			}
+
+			contents[i] = ClipboardContent{
+				MIME: string(mime),
+				Data: data,
+			}
+		}
+	}
+
+	result := t.onClipboardWrite(t, ClipboardWrite{
+		Location: ClipboardLocation(write.location),
+		Contents: contents,
+	})
+	return C.GhosttyClipboardWriteResult(result)
+}
+
+// clipboardSizeToInt converts a C size to a Go slice length without allowing
+// an overflowing conversion to produce an invalid unsafe.Slice length.
+func clipboardSizeToInt(size C.size_t) (int, bool) {
+	if uint64(size) > uint64(^uint(0)>>1) {
+		return 0, false
+	}
+	return int(size), true
+}
+
+// copyClipboardString copies a borrowed, binary-safe GhosttyString into Go
+// memory. For zero-length strings the pointer is intentionally ignored because
+// libghostty does not require it to be valid.
+func copyClipboardString(value C.GhosttyString) ([]byte, bool) {
+	length, ok := clipboardSizeToInt(value.len)
+	if !ok {
+		return nil, false
+	}
+	if length == 0 {
+		return []byte{}, true
+	}
+	if value.ptr == nil {
+		return nil, false
+	}
+
+	return append([]byte(nil), unsafe.Slice((*byte)(unsafe.Pointer(value.ptr)), length)...), true
 }
 
 //export goTitleChangedTrampoline

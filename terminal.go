@@ -30,6 +30,7 @@ type Terminal struct {
 
 	onWritePty         WritePtyFn
 	onBell             BellFn
+	onClipboardWrite   ClipboardWriteFn
 	onTitleChanged     TitleChangedFn
 	onEnquiry          EnquiryFn
 	onXtversion        XtversionFn
@@ -66,6 +67,7 @@ type TerminalConfig struct {
 	// Effect handlers applied after terminal creation.
 	onWritePty         WritePtyFn
 	onBell             BellFn
+	onClipboardWrite   ClipboardWriteFn
 	onTitleChanged     TitleChangedFn
 	onEnquiry          EnquiryFn
 	onXtversion        XtversionFn
@@ -84,6 +86,82 @@ type WritePtyFn func(t *Terminal, data []byte)
 // The parameter is the terminal that triggered the effect.
 // C: GhosttyTerminalBellFn
 type BellFn func(t *Terminal)
+
+// ClipboardLocation identifies the normalized destination for a clipboard
+// write. Protocol-specific selectors are converted to one of these values
+// before the callback runs.
+// C: GhosttyClipboardLocation
+type ClipboardLocation int
+
+const (
+	// ClipboardLocationStandard identifies the standard system clipboard.
+	ClipboardLocationStandard ClipboardLocation = C.GHOSTTY_CLIPBOARD_LOCATION_STANDARD
+
+	// ClipboardLocationSelection identifies the selection clipboard.
+	ClipboardLocationSelection ClipboardLocation = C.GHOSTTY_CLIPBOARD_LOCATION_SELECTION
+
+	// ClipboardLocationPrimary identifies the primary selection clipboard.
+	ClipboardLocationPrimary ClipboardLocation = C.GHOSTTY_CLIPBOARD_LOCATION_PRIMARY
+)
+
+// ClipboardContent is one MIME representation in a clipboard write. Data is
+// decoded from its protocol-level encoding and is binary-safe. Empty Data is
+// an explicit empty representation; only an empty [ClipboardWrite.Contents]
+// requests that the destination be cleared.
+// C: GhosttyClipboardContent
+type ClipboardContent struct {
+	// MIME is the MIME type of this representation.
+	MIME string
+
+	// Data is the decoded, binary-safe representation data.
+	Data []byte
+}
+
+// ClipboardWrite is a semantic, atomic clipboard write. Every entry in
+// Contents represents the same logical value and should be committed
+// atomically. An empty Contents slice requests that Location be cleared.
+// C: GhosttyClipboardWrite
+type ClipboardWrite struct {
+	// Location is the normalized clipboard destination.
+	Location ClipboardLocation
+
+	// Contents contains all MIME representations of the logical value.
+	Contents []ClipboardContent
+}
+
+// ClipboardWriteResult reports the outcome of a clipboard write callback.
+// Protocols without write acknowledgements, including OSC 52 and iTerm2
+// OSC 1337 Copy, ignore this result.
+// C: GhosttyClipboardWriteResult
+type ClipboardWriteResult int
+
+const (
+	// ClipboardWriteSuccess means the clipboard write completed successfully.
+	ClipboardWriteSuccess ClipboardWriteResult = C.GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS
+
+	// ClipboardWriteDenied means policy or the user denied the write.
+	ClipboardWriteDenied ClipboardWriteResult = C.GHOSTTY_CLIPBOARD_WRITE_RESULT_DENIED
+
+	// ClipboardWriteUnsupported means the destination or a representation is unsupported.
+	ClipboardWriteUnsupported ClipboardWriteResult = C.GHOSTTY_CLIPBOARD_WRITE_RESULT_UNSUPPORTED
+
+	// ClipboardWriteBusy means the clipboard is temporarily unavailable.
+	ClipboardWriteBusy ClipboardWriteResult = C.GHOSTTY_CLIPBOARD_WRITE_RESULT_BUSY
+
+	// ClipboardWriteInvalidData means one or more representations contain invalid data.
+	ClipboardWriteInvalidData ClipboardWriteResult = C.GHOSTTY_CLIPBOARD_WRITE_RESULT_INVALID_DATA
+
+	// ClipboardWriteIOError means the clipboard write failed due to an I/O error.
+	ClipboardWriteIOError ClipboardWriteResult = C.GHOSTTY_CLIPBOARD_WRITE_RESULT_IO_ERROR
+)
+
+// ClipboardWriteFn is called synchronously for a complete logical clipboard
+// write. Protocol details such as selectors, encodings, chunks, and aliases
+// have already been normalized. The write and all of its content are copied
+// into Go-owned memory before the callback runs and may be retained. Return
+// the result of attempting the write.
+// C: GhosttyTerminalClipboardWriteFn
+type ClipboardWriteFn func(t *Terminal, write ClipboardWrite) ClipboardWriteResult
 
 // TitleChangedFn is called when the terminal title changes via OSC 0/2.
 // The parameter is the terminal that triggered the effect.
@@ -152,6 +230,14 @@ func WithWritePty(fn WritePtyFn) TerminalOption {
 func WithBell(fn BellFn) TerminalOption {
 	return func(c *TerminalConfig) {
 		c.onBell = fn
+	}
+}
+
+// WithClipboardWrite registers an effect handler invoked for normalized,
+// decoded clipboard writes. Clipboard read requests are never forwarded.
+func WithClipboardWrite(fn ClipboardWriteFn) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.onClipboardWrite = fn
 	}
 }
 
@@ -233,6 +319,7 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 		ptr:                cterm,
 		onWritePty:         cfg.onWritePty,
 		onBell:             cfg.onBell,
+		onClipboardWrite:   cfg.onClipboardWrite,
 		onTitleChanged:     cfg.onTitleChanged,
 		onEnquiry:          cfg.onEnquiry,
 		onXtversion:        cfg.onXtversion,

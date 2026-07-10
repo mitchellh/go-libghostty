@@ -24,6 +24,13 @@ func (t *Terminal) SetEffectBell(fn BellFn) {
 	t.syncEffects()
 }
 
+// SetEffectClipboardWrite registers (or clears) the clipboard-write effect
+// on a live terminal. Pass nil to clear.
+func (t *Terminal) SetEffectClipboardWrite(fn ClipboardWriteFn) {
+	t.onClipboardWrite = fn
+	t.syncEffects()
+}
+
 // SetEffectTitleChanged registers (or clears) the title-changed effect
 // on a live terminal. Pass nil to clear.
 func (t *Terminal) SetEffectTitleChanged(fn TitleChangedFn) {
