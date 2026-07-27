@@ -50,7 +50,7 @@ func TestGridRefHyperlinkURIAndPointFromGridRef(t *testing.T) {
 }
 
 func TestTerminalPointFromGridRefNoValue(t *testing.T) {
-	term, err := NewTerminal(WithSize(8, 3), WithMaxScrollback(100))
+	term, err := NewTerminal(WithSize(8, 3), WithMaxScrollbackLines(100))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestTerminalTrackGridRefInvalidPoint(t *testing.T) {
 }
 
 func TestTrackedGridRef(t *testing.T) {
-	term, err := NewTerminal(WithSize(8, 3), WithMaxScrollback(100))
+	term, err := NewTerminal(WithSize(8, 3), WithMaxScrollbackLines(100))
 	if err != nil {
 		t.Fatal(err)
 	}

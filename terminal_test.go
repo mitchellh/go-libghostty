@@ -34,7 +34,7 @@ func TestNewTerminalNoOptions(t *testing.T) {
 }
 
 func TestNewTerminalWithScrollback(t *testing.T) {
-	term, err := NewTerminal(WithSize(80, 24), WithMaxScrollback(1000))
+	term, err := NewTerminal(WithSize(80, 24), WithMaxScrollbackLines(1000))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,7 @@
 //
 //	term, err := libghostty.NewTerminal(
 //		libghostty.WithSize(80, 24),
-//		libghostty.WithMaxScrollback(1000),
+//		libghostty.WithMaxScrollbackLines(1000),
 //	)
 //	if err != nil {
 //		log.Fatal(err)

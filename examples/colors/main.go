@@ -15,7 +15,7 @@ func main() {
 	// Step 1: Create an 80×24 terminal with no scrollback.
 	t, err := ghostty.NewTerminal(
 		ghostty.WithSize(80, 24),
-		ghostty.WithMaxScrollback(0),
+		ghostty.WithMaxScrollbackBytes(0),
 	)
 	if err != nil {
 		log.Fatal(err)

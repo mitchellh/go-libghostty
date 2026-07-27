@@ -123,8 +123,9 @@ const (
 	// is enabled for Kitty image loading (bool).
 	TerminalDataKittyImageMediumFile TerminalData = C.GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE
 
-	// TerminalDataKittyImageMediumTempFile indicates whether the temporary
-	// file medium is enabled for Kitty image loading (bool).
+	// TerminalDataKittyImageMediumTempFile is the directory allowed for
+	// temporary-file image loading, or an empty string when disabled
+	// (GhosttyString).
 	TerminalDataKittyImageMediumTempFile TerminalData = C.GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE
 
 	// TerminalDataKittyImageMediumSharedMem indicates whether the shared
@@ -142,6 +143,18 @@ const (
 	// TerminalDataViewportActive indicates whether the viewport is pinned
 	// to the active terminal area rather than scrolled into history (bool).
 	TerminalDataViewportActive TerminalData = C.GHOSTTY_TERMINAL_DATA_VIEWPORT_ACTIVE
+
+	// TerminalDataVTProcessingError indicates whether VT processing ever
+	// encountered a non-gracefully handled semantic update failure (bool).
+	TerminalDataVTProcessingError TerminalData = C.GHOSTTY_TERMINAL_DATA_VT_PROCESSING_ERROR
+
+	// TerminalDataScrollbackMaxBytes is the configured approximate byte
+	// limit (size_t), or GHOSTTY_NO_VALUE when unlimited.
+	TerminalDataScrollbackMaxBytes TerminalData = C.GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_BYTES
+
+	// TerminalDataScrollbackMaxLines is the configured approximate physical
+	// line limit (size_t), or GHOSTTY_NO_VALUE when unlimited.
+	TerminalDataScrollbackMaxLines TerminalData = C.GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_LINES
 )
 
 // ActiveScreen returns which screen buffer is currently active.
@@ -315,6 +328,62 @@ func (t *Terminal) KittyKeyboardFlags() (KittyKeyFlags, error) {
 	return KittyKeyFlags(v), nil
 }
 
+// KittyImageMediumFile reports whether Kitty image loading via arbitrary
+// files is enabled for the active screen.
+func (t *Terminal) KittyImageMediumFile() (bool, error) {
+	var v C.bool
+	if err := resultError(C.ghostty_terminal_get(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_FILE,
+		unsafe.Pointer(&v),
+	)); err != nil {
+		return false, err
+	}
+	return bool(v), nil
+}
+
+// KittyImageMediumSharedMem reports whether Kitty image loading via shared
+// memory is enabled for the active screen.
+func (t *Terminal) KittyImageMediumSharedMem() (bool, error) {
+	var v C.bool
+	if err := resultError(C.ghostty_terminal_get(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_SHARED_MEM,
+		unsafe.Pointer(&v),
+	)); err != nil {
+		return false, err
+	}
+	return bool(v), nil
+}
+
+// KittyImageMediumTempFile returns the directory allowed for Kitty
+// temporary-file image loading. An empty string means the medium is disabled.
+func (t *Terminal) KittyImageMediumTempFile() (string, error) {
+	var s C.GhosttyString
+	if err := resultError(C.ghostty_terminal_get(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_MEDIUM_TEMP_FILE,
+		unsafe.Pointer(&s),
+	)); err != nil {
+		return "", err
+	}
+	return C.GoStringN((*C.char)(unsafe.Pointer(s.ptr)), C.int(s.len)), nil
+}
+
+// KittyImageStorageLimit returns the active screen's Kitty image storage
+// limit in bytes. Zero means the protocol is disabled.
+func (t *Terminal) KittyImageStorageLimit() (uint64, error) {
+	var v C.uint64_t
+	if err := resultError(C.ghostty_terminal_get(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_KITTY_IMAGE_STORAGE_LIMIT,
+		unsafe.Pointer(&v),
+	)); err != nil {
+		return 0, err
+	}
+	return uint64(v), nil
+}
+
 // MouseTracking reports whether any mouse tracking mode is active.
 func (t *Terminal) MouseTracking() (bool, error) {
 	var v C.bool
@@ -397,6 +466,18 @@ func (t *Terminal) ScrollbackRows() (uint, error) {
 	return uint(v), nil
 }
 
+// ScrollbackMaxBytes returns the configured approximate scrollback byte
+// limit. Nil means the byte limit is unlimited.
+func (t *Terminal) ScrollbackMaxBytes() (*uint, error) {
+	return t.getOptionalSize(C.GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_BYTES)
+}
+
+// ScrollbackMaxLines returns the configured approximate physical line
+// limit. Nil means the line limit is unlimited.
+func (t *Terminal) ScrollbackMaxLines() (*uint, error) {
+	return t.getOptionalSize(C.GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_LINES)
+}
+
 // Title returns the terminal title as set by escape sequences
 // (e.g. OSC 0/2). Returns an empty string if unset. The returned
 // string is copied; it remains valid after subsequent calls to
@@ -417,6 +498,21 @@ func (t *Terminal) TotalRows() (uint, error) {
 		return 0, err
 	}
 	return uint(v), nil
+}
+
+// VTProcessingError reports whether VT processing has ever encountered a
+// non-gracefully handled failure that may have prevented a semantic update.
+// Reset does not clear this informational flag.
+func (t *Terminal) VTProcessingError() (bool, error) {
+	var v C.bool
+	if err := resultError(C.ghostty_terminal_get(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_VT_PROCESSING_ERROR,
+		unsafe.Pointer(&v),
+	)); err != nil {
+		return false, err
+	}
+	return bool(v), nil
 }
 
 // ViewportActive reports whether the viewport is pinned to the active
@@ -466,4 +562,20 @@ func (t *Terminal) getPalette(data C.GhosttyTerminalData) (*Palette, error) {
 		p[i] = ColorRGB{R: uint8(c.r), G: uint8(c.g), B: uint8(c.b)}
 	}
 	return &p, nil
+}
+
+// getOptionalSize reads a size_t terminal value that uses NO_VALUE to mean
+// unlimited.
+func (t *Terminal) getOptionalSize(data C.GhosttyTerminalData) (*uint, error) {
+	var v C.size_t
+	err := resultError(C.ghostty_terminal_get(t.ptr, data, unsafe.Pointer(&v)))
+	if err != nil {
+		var ge *Error
+		if errors.As(err, &ge) && ge.Result == ResultNoValue {
+			return nil, nil
+		}
+		return nil, err
+	}
+	value := uint(v)
+	return &value, nil
 }

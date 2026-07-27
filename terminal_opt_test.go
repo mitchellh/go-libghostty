@@ -358,3 +358,127 @@ func TestTerminalSetColorPalette(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTerminalSetScrollbackLimits(t *testing.T) {
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithMaxScrollbackBytes(4096),
+		WithMaxScrollbackLines(100),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	bytes, err := term.ScrollbackMaxBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes == nil || *bytes != 4096 {
+		t.Fatalf("expected 4096-byte limit, got %v", bytes)
+	}
+
+	lines, err := term.ScrollbackMaxLines()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines == nil || *lines != 100 {
+		t.Fatalf("expected 100-line limit, got %v", lines)
+	}
+
+	if err := term.SetScrollbackMaxBytes(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := term.SetScrollbackMaxLines(nil); err != nil {
+		t.Fatal(err)
+	}
+	if bytes, err := term.ScrollbackMaxBytes(); err != nil {
+		t.Fatal(err)
+	} else if bytes != nil {
+		t.Fatalf("expected unlimited byte limit, got %v", *bytes)
+	}
+	if lines, err := term.ScrollbackMaxLines(); err != nil {
+		t.Fatal(err)
+	} else if lines != nil {
+		t.Fatalf("expected unlimited line limit, got %v", *lines)
+	}
+}
+
+func TestTerminalAdditionalOptions(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	style := TerminalCursorStyleBar
+	blink := true
+	if err := term.SetDefaultCursorStyle(&style); err != nil {
+		t.Fatal(err)
+	}
+	if err := term.SetDefaultCursorBlink(&blink); err != nil {
+		t.Fatal(err)
+	}
+	if err := term.SetGlyphProtocol(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := term.SetDefaultCursorStyle(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := term.SetDefaultCursorBlink(nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTerminalPwdChangedEffect(t *testing.T) {
+	var calls int
+	var pwd string
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithPwdChanged(func(term *Terminal) {
+			calls++
+			pwd, _ = term.Pwd()
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	term.VTWrite([]byte("\x1b]7;file:///tmp\x07"))
+	if calls != 1 {
+		t.Fatalf("expected one pwd-changed callback, got %d", calls)
+	}
+	if pwd != "file:///tmp" {
+		t.Fatalf("expected pwd %q, got %q", "file:///tmp", pwd)
+	}
+
+	term.SetEffectPwdChanged(nil)
+	term.VTWrite([]byte("\x1b]7;file:///var\x07"))
+	if calls != 1 {
+		t.Fatalf("expected callback to remain cleared, got %d calls", calls)
+	}
+}
+
+func TestTerminalCompression(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24), WithMaxScrollbackLines(100))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	if _, err := term.CompressionActivity(); err != nil {
+		t.Fatal(err)
+	}
+	result, err := term.Compress(TerminalCompressionIncremental)
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch result {
+	case TerminalCompressionUnsupported,
+		TerminalCompressionPending,
+		TerminalCompressionComplete:
+	default:
+		t.Fatalf("unexpected compression result %d", result)
+	}
+}

@@ -5,6 +5,8 @@ package libghostty
 */
 import "C"
 
+import "unsafe"
+
 // SizeReportStyle determines the output format for a terminal size report.
 // C: GhosttySizeReportStyle
 type SizeReportStyle int
@@ -37,4 +39,43 @@ type SizeReportSize struct {
 
 	// CellHeight is the height of a single terminal cell in pixels.
 	CellHeight uint32
+}
+
+// SizeReportEncode encodes a terminal size report in the requested style.
+func SizeReportEncode(style SizeReportStyle, size SizeReportSize) ([]byte, error) {
+	csize := C.GhosttySizeReportSize{
+		rows:        C.uint16_t(size.Rows),
+		columns:     C.uint16_t(size.Columns),
+		cell_width:  C.uint32_t(size.CellWidth),
+		cell_height: C.uint32_t(size.CellHeight),
+	}
+
+	var buf [64]byte
+	var written C.size_t
+	result := C.ghostty_size_report_encode(
+		C.GhosttySizeReportStyle(style),
+		csize,
+		(*C.char)(unsafe.Pointer(&buf[0])),
+		C.size_t(len(buf)),
+		&written,
+	)
+	if result == C.GHOSTTY_SUCCESS {
+		return append([]byte(nil), buf[:int(written)]...), nil
+	}
+	if result != C.GHOSTTY_OUT_OF_SPACE {
+		return nil, &Error{Result: Result(result)}
+	}
+
+	out := make([]byte, int(written))
+	var outWritten C.size_t
+	if err := resultError(C.ghostty_size_report_encode(
+		C.GhosttySizeReportStyle(style),
+		csize,
+		(*C.char)(unsafe.Pointer(&out[0])),
+		C.size_t(len(out)),
+		&outWritten,
+	)); err != nil {
+		return nil, err
+	}
+	return out[:int(outWritten)], nil
 }

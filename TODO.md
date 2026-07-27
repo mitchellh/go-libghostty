@@ -1,26 +1,5 @@
 # Missing APIs
 
-## Not Bound
-
-- [ ] OSC parser (`osc.h`)
-  - `ghostty_osc_new()`
-  - `ghostty_osc_free()`
-  - `ghostty_osc_reset()`
-  - `ghostty_osc_next()`
-  - `ghostty_osc_end()`
-  - `ghostty_osc_command_type()`
-  - `ghostty_osc_command_data()`
-- [ ] SGR parser (`sgr.h`)
-  - `ghostty_sgr_new()`
-  - `ghostty_sgr_free()`
-  - `ghostty_sgr_reset()`
-  - `ghostty_sgr_set_params()`
-  - `ghostty_sgr_next()`
-  - `ghostty_sgr_unknown_full()`
-  - `ghostty_sgr_unknown_partial()`
-  - `ghostty_sgr_attribute_tag()`
-  - `ghostty_sgr_attribute_value()`
-
 ## WASM-only Not Bound
 
 These APIs are guarded by `#ifdef __wasm__` upstream and are not available in the native cgo build.
@@ -38,12 +17,3 @@ These APIs are guarded by `#ifdef __wasm__` upstream and are not available in th
   - `ghostty_wasm_free_usize()`
   - `ghostty_wasm_alloc_sgr_attribute()` (`sgr.h`)
   - `ghostty_wasm_free_sgr_attribute()` (`sgr.h`)
-
-## Partially Bound
-
-- [ ] `ghostty_mode_report_encode()`
-- [ ] `ghostty_size_report_encode()`
-- [ ] `ghostty_type_json()`
-- [ ] `ghostty_style_default()`
-- [ ] `ghostty_color_rgb_get()`
-- [ ] `ghostty_formatter_format_buf()`

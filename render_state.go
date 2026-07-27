@@ -113,3 +113,16 @@ func (rs *RenderState) Close() {
 func (rs *RenderState) Update(t *Terminal) error {
 	return resultError(C.ghostty_render_state_update(rs.ptr, t.ptr))
 }
+
+// BeginUpdate performs the terminal-dependent phase of a two-phase render
+// state update. Every successful call must be paired with [RenderState.EndUpdate]
+// before reading the render state.
+func (rs *RenderState) BeginUpdate(t *Terminal) error {
+	return resultError(C.ghostty_render_state_begin_update(rs.ptr, t.ptr))
+}
+
+// EndUpdate completes deferred work from [RenderState.BeginUpdate]. It only
+// accesses render-state-owned memory and does not require terminal access.
+func (rs *RenderState) EndUpdate() error {
+	return resultError(C.ghostty_render_state_end_update(rs.ptr))
+}

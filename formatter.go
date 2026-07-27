@@ -215,6 +215,26 @@ func (f *Formatter) Format() ([]byte, error) {
 	return C.GoBytes(unsafe.Pointer(outPtr), C.int(outLen)), nil
 }
 
+// FormatBuf formats into buf and returns the number of bytes written. If buf
+// is too small, the returned count is the required size and the error has
+// result [ResultOutOfSpace]. A nil buffer can be used to query the required
+// size.
+func (f *Formatter) FormatBuf(buf []byte) (int, error) {
+	var ptr *C.uint8_t
+	if len(buf) > 0 {
+		ptr = (*C.uint8_t)(unsafe.Pointer(&buf[0]))
+	}
+
+	var written C.size_t
+	result := C.ghostty_formatter_format_buf(
+		f.ptr,
+		ptr,
+		C.size_t(len(buf)),
+		&written,
+	)
+	return int(written), resultError(result)
+}
+
 // FormatString runs the formatter and returns the output as a string.
 // This is a convenience wrapper around Format.
 func (f *Formatter) FormatString() (string, error) {

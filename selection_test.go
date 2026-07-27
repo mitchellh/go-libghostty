@@ -202,7 +202,7 @@ func TestTerminalActiveSelectionFormat(t *testing.T) {
 }
 
 func TestSelectionGestureAPIs(t *testing.T) {
-	term, err := NewTerminal(WithSize(20, 4), WithMaxScrollback(100))
+	term, err := NewTerminal(WithSize(20, 4), WithMaxScrollbackLines(100))
 	if err != nil {
 		t.Fatal(err)
 	}

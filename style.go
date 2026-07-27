@@ -49,15 +49,26 @@ type StyleColor struct {
 	RGB ColorRGB
 }
 
-// Underline style constants.
+// SGR underline styles.
 // C: GhosttySgrUnderline
 const (
-	UnderlineNone   = C.GHOSTTY_SGR_UNDERLINE_NONE
-	UnderlineSingle = C.GHOSTTY_SGR_UNDERLINE_SINGLE
-	UnderlineDouble = C.GHOSTTY_SGR_UNDERLINE_DOUBLE
-	UnderlineCurly  = C.GHOSTTY_SGR_UNDERLINE_CURLY
-	UnderlineDotted = C.GHOSTTY_SGR_UNDERLINE_DOTTED
-	UnderlineDashed = C.GHOSTTY_SGR_UNDERLINE_DASHED
+	// UnderlineNone disables underlining.
+	UnderlineNone SGRUnderline = C.GHOSTTY_SGR_UNDERLINE_NONE
+
+	// UnderlineSingle draws a single underline.
+	UnderlineSingle SGRUnderline = C.GHOSTTY_SGR_UNDERLINE_SINGLE
+
+	// UnderlineDouble draws a double underline.
+	UnderlineDouble SGRUnderline = C.GHOSTTY_SGR_UNDERLINE_DOUBLE
+
+	// UnderlineCurly draws a curly underline.
+	UnderlineCurly SGRUnderline = C.GHOSTTY_SGR_UNDERLINE_CURLY
+
+	// UnderlineDotted draws a dotted underline.
+	UnderlineDotted SGRUnderline = C.GHOSTTY_SGR_UNDERLINE_DOTTED
+
+	// UnderlineDashed draws a dashed underline.
+	UnderlineDashed SGRUnderline = C.GHOSTTY_SGR_UNDERLINE_DASHED
 )
 
 // Style is a thin wrapper around the copied C GhosttyStyle value. It
@@ -68,6 +79,13 @@ const (
 // C: GhosttyStyle
 type Style struct {
 	c C.GhosttyStyle
+}
+
+// DefaultStyle returns a new style initialized to Ghostty's default values.
+func DefaultStyle() *Style {
+	var c C.GhosttyStyle
+	C.ghostty_style_default(&c)
+	return &Style{c: c}
 }
 
 // IsDefault reports whether the style is the default style
@@ -132,8 +150,8 @@ func (s *Style) Overline() bool {
 }
 
 // Underline returns the underline style (one of the Underline* constants).
-func (s *Style) Underline() int {
-	return int(s.c.underline)
+func (s *Style) Underline() SGRUnderline {
+	return SGRUnderline(s.c.underline)
 }
 
 // styleColorFromC converts a C GhosttyStyleColor to a Go StyleColor.

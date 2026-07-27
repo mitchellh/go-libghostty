@@ -180,3 +180,32 @@ func TestRenderStateCursor(t *testing.T) {
 		t.Fatalf("expected cursor at 0,0, got %d,%d", x, y)
 	}
 }
+
+func TestRenderStateTwoPhaseUpdate(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.VTWrite([]byte("two phase"))
+
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+
+	if err := rs.BeginUpdate(term); err != nil {
+		t.Fatal(err)
+	}
+	if err := rs.EndUpdate(); err != nil {
+		t.Fatal(err)
+	}
+	cols, err := rs.Cols()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cols != 80 {
+		t.Fatalf("expected 80 columns, got %d", cols)
+	}
+}

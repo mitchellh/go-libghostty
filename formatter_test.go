@@ -2,6 +2,7 @@ package libghostty
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -172,5 +173,38 @@ func TestFormatterWriteTo(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "writeto test") {
 		t.Fatalf("expected output to contain 'writeto test', got %q", buf.String())
+	}
+}
+
+func TestFormatterFormatBuf(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.VTWrite([]byte("buffer format"))
+
+	f, err := NewFormatter(term)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	required, err := f.FormatBuf(nil)
+	var resultErr *Error
+	if !errors.As(err, &resultErr) || resultErr.Result != ResultOutOfSpace {
+		t.Fatalf("expected out-of-space size query, got required=%d err=%v", required, err)
+	}
+
+	buf := make([]byte, required)
+	written, err := f.FormatBuf(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written != required {
+		t.Fatalf("expected %d bytes written, got %d", required, written)
+	}
+	if !strings.Contains(string(buf[:written]), "buffer format") {
+		t.Fatalf("expected formatted contents, got %q", buf[:written])
 	}
 }

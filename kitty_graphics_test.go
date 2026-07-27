@@ -113,7 +113,16 @@ func TestKittyGraphicsMediumSetters(t *testing.T) {
 	if err := term.SetKittyImageMediumFile(false); err != nil {
 		t.Fatal(err)
 	}
-	if err := term.SetKittyImageMediumTempFile(true); err != nil {
+	directory := t.TempDir()
+	if err := term.SetKittyImageMediumTempFile(&directory); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := term.KittyImageMediumTempFile(); err != nil {
+		t.Fatal(err)
+	} else if got != directory {
+		t.Fatalf("expected temporary-file directory %q, got %q", directory, got)
+	}
+	if err := term.SetKittyImageMediumTempFile(nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := term.SetKittyImageMediumSharedMem(true); err != nil {

@@ -33,6 +33,21 @@ func initCSelection() C.GhosttySelection {
 	return C.init_selection()
 }
 
+// KittyGraphicsData identifies a storage-level Kitty graphics query.
+// C: GhosttyKittyGraphicsData
+type KittyGraphicsData int
+
+const (
+	// KittyGraphicsDataInvalid is an invalid or sentinel query.
+	KittyGraphicsDataInvalid KittyGraphicsData = C.GHOSTTY_KITTY_GRAPHICS_DATA_INVALID
+
+	// KittyGraphicsDataPlacementIterator populates a placement iterator.
+	KittyGraphicsDataPlacementIterator KittyGraphicsData = C.GHOSTTY_KITTY_GRAPHICS_DATA_PLACEMENT_ITERATOR
+
+	// KittyGraphicsDataGeneration returns the storage-wide mutation stamp.
+	KittyGraphicsDataGeneration KittyGraphicsData = C.GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION
+)
+
 // KittyGraphicsImageData identifies a data field for Kitty graphics
 // image queries.
 // C: GhosttyKittyGraphicsImageData
@@ -69,6 +84,10 @@ const (
 	// KittyGraphicsImageDataDataLen is the length of the raw pixel data
 	// in bytes (size_t).
 	KittyGraphicsImageDataDataLen KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN
+
+	// KittyGraphicsImageDataGeneration is the image's content generation
+	// stamp (uint64_t).
+	KittyGraphicsImageDataGeneration KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_GENERATION
 )
 
 // KittyGraphicsPlacementData identifies a data field for Kitty graphics
@@ -268,6 +287,9 @@ type KittyGraphicsImageInfo struct {
 	// Compression is the compression of the image.
 	Compression KittyImageCompression
 
+	// Generation is the image's process-wide content generation stamp.
+	Generation uint64
+
 	// Data is a borrowed slice of the raw pixel data. Only valid
 	// until the next mutating terminal call.
 	Data []byte
@@ -367,6 +389,21 @@ func (kg *KittyGraphics) PlacementIterator(iter *KittyGraphicsPlacementIterator)
 		C.GHOSTTY_KITTY_GRAPHICS_DATA_PLACEMENT_ITERATOR,
 		unsafe.Pointer(&iter.ptr),
 	))
+}
+
+// Generation returns the process-wide mutation stamp for this image storage.
+// If unchanged, the placements and image contents are identical to the prior
+// observation. Placement geometry may still have changed.
+func (kg *KittyGraphics) Generation() (uint64, error) {
+	var generation C.uint64_t
+	if err := resultError(C.ghostty_kitty_graphics_get(
+		kg.ptr,
+		C.GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION,
+		unsafe.Pointer(&generation),
+	)); err != nil {
+		return 0, err
+	}
+	return uint64(generation), nil
 }
 
 // Image looks up a Kitty graphics image by its image ID. Returns nil
@@ -497,6 +534,20 @@ func (img *KittyGraphicsImage) Compression() (KittyImageCompression, error) {
 	return KittyImageCompression(v), nil
 }
 
+// Generation returns the process-wide content generation stamp assigned when
+// the image was added or replaced.
+func (img *KittyGraphicsImage) Generation() (uint64, error) {
+	var generation C.uint64_t
+	if err := resultError(C.ghostty_kitty_graphics_image_get(
+		img.ptr,
+		C.GHOSTTY_KITTY_IMAGE_DATA_GENERATION,
+		unsafe.Pointer(&generation),
+	)); err != nil {
+		return 0, err
+	}
+	return uint64(generation), nil
+}
+
 // Info returns all image metadata in a single call. This is more
 // efficient than calling ID, Number, Width, Height, Format,
 // Compression, and Data individually. Uses the get_multi C API
@@ -510,6 +561,7 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 		height      C.uint32_t
 		format      C.GhosttyKittyImageFormat
 		compression C.GhosttyKittyImageCompression
+		generation  C.uint64_t
 		dataPtr     *C.uint8_t
 		dataLen     C.size_t
 	)
@@ -522,6 +574,7 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 		C.GHOSTTY_KITTY_IMAGE_DATA_HEIGHT,
 		C.GHOSTTY_KITTY_IMAGE_DATA_FORMAT,
 		C.GHOSTTY_KITTY_IMAGE_DATA_COMPRESSION,
+		C.GHOSTTY_KITTY_IMAGE_DATA_GENERATION,
 		C.GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR,
 		C.GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN,
 	}
@@ -537,6 +590,7 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 		unsafe.Pointer(&height),
 		unsafe.Pointer(&format),
 		unsafe.Pointer(&compression),
+		unsafe.Pointer(&generation),
 		unsafe.Pointer(&dataPtr),
 		unsafe.Pointer(&dataLen),
 	}
@@ -560,6 +614,7 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 		Height:      uint32(height),
 		Format:      KittyImageFormat(format),
 		Compression: KittyImageCompression(compression),
+		Generation:  uint64(generation),
 	}
 
 	if dataPtr != nil && dataLen > 0 {

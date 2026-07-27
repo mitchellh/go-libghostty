@@ -160,7 +160,7 @@ func TestTerminalSelection(t *testing.T) {
 }
 
 func TestTerminalTotalScrollbackRows(t *testing.T) {
-	term, err := NewTerminal(WithSize(80, 24), WithMaxScrollback(100))
+	term, err := NewTerminal(WithSize(80, 24), WithMaxScrollbackLines(100))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestTerminalMouseTracking(t *testing.T) {
 }
 
 func TestTerminalViewportActive(t *testing.T) {
-	term, err := NewTerminal(WithSize(8, 3), WithMaxScrollback(100))
+	term, err := NewTerminal(WithSize(8, 3), WithMaxScrollbackLines(100))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,6 +278,22 @@ func TestTerminalViewportActive(t *testing.T) {
 	}
 	if !active {
 		t.Fatal("expected viewport to be active after scrolling to bottom")
+	}
+}
+
+func TestTerminalVTProcessingError(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	failed, err := term.VTProcessingError()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed {
+		t.Fatal("expected a fresh terminal to have no VT processing error")
 	}
 }
 

@@ -38,6 +38,13 @@ func (t *Terminal) SetEffectTitleChanged(fn TitleChangedFn) {
 	t.syncEffects()
 }
 
+// SetEffectPwdChanged registers (or clears) the pwd-changed effect on a live
+// terminal. Pass nil to clear.
+func (t *Terminal) SetEffectPwdChanged(fn PwdChangedFn) {
+	t.onPwdChanged = fn
+	t.syncEffects()
+}
+
 // SetEffectEnquiry registers (or clears) the enquiry effect on a live
 // terminal. Pass nil to clear.
 func (t *Terminal) SetEffectEnquiry(fn EnquiryFn) {
@@ -136,6 +143,46 @@ func (t *Terminal) SetColorPalette(palette *Palette) error {
 	))
 }
 
+// SetDefaultCursorBlink sets whether DECSCUSR reset selects a blinking
+// cursor. Passing nil restores the built-in default of not blinking.
+func (t *Terminal) SetDefaultCursorBlink(blink *bool) error {
+	var val unsafe.Pointer
+	if blink != nil {
+		v := C.bool(*blink)
+		val = unsafe.Pointer(&v)
+	}
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_BLINK,
+		val,
+	))
+}
+
+// SetDefaultCursorStyle sets the cursor style selected by DECSCUSR reset.
+// Passing nil restores the built-in block cursor.
+func (t *Terminal) SetDefaultCursorStyle(style *TerminalCursorStyle) error {
+	var val unsafe.Pointer
+	if style != nil {
+		v := C.GhosttyTerminalCursorStyle(*style)
+		val = unsafe.Pointer(&v)
+	}
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_DEFAULT_CURSOR_STYLE,
+		val,
+	))
+}
+
+// SetGlyphProtocol enables or disables Glyph Protocol APC handling.
+func (t *Terminal) SetGlyphProtocol(enabled bool) error {
+	v := C.bool(enabled)
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_GLYPH_PROTOCOL,
+		unsafe.Pointer(&v),
+	))
+}
+
 // SetAPCMaxBytes sets the maximum bytes the APC handler will buffer for
 // all protocols. Passing nil removes all overrides and reverts to the
 // built-in defaults.
@@ -171,15 +218,7 @@ func (t *Terminal) SetAPCMaxBytesKitty(limit *uint) error {
 // SetPwd sets the terminal working directory manually. An empty string
 // clears it.
 func (t *Terminal) SetPwd(pwd string) error {
-	s := C.GhosttyString{
-		ptr: (*C.uint8_t)(unsafe.Pointer(unsafe.StringData(pwd))),
-		len: C.size_t(len(pwd)),
-	}
-	return resultError(C.ghostty_terminal_set(
-		t.ptr,
-		C.GHOSTTY_TERMINAL_OPT_PWD,
-		unsafe.Pointer(&s),
-	))
+	return t.setStringOption(C.GHOSTTY_TERMINAL_OPT_PWD, &pwd)
 }
 
 // SetSelection sets the active screen selection. Passing nil clears the
@@ -232,15 +271,13 @@ func (t *Terminal) SetKittyImageMediumFile(enabled bool) error {
 	))
 }
 
-// SetKittyImageMediumTempFile enables or disables Kitty image loading via
-// the temporary file medium.
-func (t *Terminal) SetKittyImageMediumTempFile(enabled bool) error {
-	v := C.bool(enabled)
-	return resultError(C.ghostty_terminal_set(
-		t.ptr,
+// SetKittyImageMediumTempFile enables Kitty image loading via the temporary
+// file medium and restricts it to directory. Passing nil disables the medium.
+func (t *Terminal) SetKittyImageMediumTempFile(directory *string) error {
+	return t.setStringOption(
 		C.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE,
-		unsafe.Pointer(&v),
-	))
+		directory,
+	)
 }
 
 // SetKittyImageMediumSharedMem enables or disables Kitty image loading via
@@ -254,15 +291,72 @@ func (t *Terminal) SetKittyImageMediumSharedMem(enabled bool) error {
 	))
 }
 
-// SetTitle sets the terminal title manually. An empty string clears it.
-func (t *Terminal) SetTitle(title string) error {
-	s := C.GhosttyString{
-		ptr: (*C.uint8_t)(unsafe.Pointer(unsafe.StringData(title))),
-		len: C.size_t(len(title)),
+// SetScrollbackMaxBytes sets the approximate maximum scrollback allocation
+// in bytes. Passing nil removes the byte limit. Lowering the limit may
+// immediately remove eligible historical pages.
+func (t *Terminal) SetScrollbackMaxBytes(limit *uint) error {
+	var val unsafe.Pointer
+	if limit != nil {
+		v := C.size_t(*limit)
+		val = unsafe.Pointer(&v)
 	}
 	return resultError(C.ghostty_terminal_set(
 		t.ptr,
-		C.GHOSTTY_TERMINAL_OPT_TITLE,
+		C.GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES,
+		val,
+	))
+}
+
+// SetScrollbackMaxLines sets the approximate maximum number of physical
+// lines retained in scrollback. Passing nil removes the line limit. Lowering
+// the limit may immediately remove eligible historical pages.
+func (t *Terminal) SetScrollbackMaxLines(limit *uint) error {
+	var val unsafe.Pointer
+	if limit != nil {
+		v := C.size_t(*limit)
+		val = unsafe.Pointer(&v)
+	}
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES,
+		val,
+	))
+}
+
+// SetTitle sets the terminal title manually. An empty string clears it.
+func (t *Terminal) SetTitle(title string) error {
+	return t.setStringOption(C.GHOSTTY_TERMINAL_OPT_TITLE, &title)
+}
+
+// setStringOption stages a Go string through C-owned memory before passing a
+// GhosttyString descriptor to cgo. ghostty_terminal_set copies string options
+// synchronously, so the temporary allocation can be released on return.
+func (t *Terminal) setStringOption(
+	option C.GhosttyTerminalOption,
+	value *string,
+) error {
+	if value == nil {
+		return resultError(C.ghostty_terminal_set(t.ptr, option, nil))
+	}
+
+	length := uintptr(len(*value))
+	var ptr unsafe.Pointer
+	if length > 0 {
+		ptr = Alloc(length)
+		if ptr == nil {
+			return &Error{Result: ResultOutOfMemory}
+		}
+		copy(unsafe.Slice((*byte)(ptr), int(length)), *value)
+		defer Free(ptr, length)
+	}
+
+	s := C.GhosttyString{
+		ptr: (*C.uint8_t)(ptr),
+		len: C.size_t(length),
+	}
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		option,
 		unsafe.Pointer(&s),
 	))
 }

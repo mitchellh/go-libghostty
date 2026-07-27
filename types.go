@@ -5,6 +5,12 @@ package libghostty
 */
 import "C"
 
+// TypeJSON returns a process-lifetime JSON description of every C API struct
+// layout for the current target.
+func TypeJSON() string {
+	return C.GoString(C.ghostty_type_json())
+}
+
 // SurfacePosition is an x/y position in rendered surface pixel space.
 //
 // This is not a terminal grid coordinate. The origin is the top-left of the

@@ -32,6 +32,7 @@ type Terminal struct {
 	onBell             BellFn
 	onClipboardWrite   ClipboardWriteFn
 	onTitleChanged     TitleChangedFn
+	onPwdChanged       PwdChangedFn
 	onEnquiry          EnquiryFn
 	onXtversion        XtversionFn
 	onSize             SizeFn
@@ -50,9 +51,8 @@ type Terminal struct {
 type TerminalOption func(*TerminalConfig)
 
 // TerminalConfig holds the configuration for creating a Terminal.
-// It can be passed directly to NewTerminal or built up using
-// functional options like WithSize and WithMaxScrollback.
-// C: GhosttyTerminalOptions
+// It is populated by functional options such as [WithSize],
+// [WithMaxScrollbackBytes], and [WithMaxScrollbackLines].
 type TerminalConfig struct {
 	// Cols is the terminal width in cells. Must be greater than zero.
 	Cols uint16
@@ -60,15 +60,20 @@ type TerminalConfig struct {
 	// Rows is the terminal height in cells. Must be greater than zero.
 	Rows uint16
 
-	// MaxScrollback is the maximum number of lines to keep in scrollback
-	// history. Defaults to 0 (no scrollback).
-	MaxScrollback uint
+	// MaxScrollbackBytes is the optional approximate maximum scrollback
+	// allocation in bytes. Nil retains libghostty's default.
+	MaxScrollbackBytes *uint
+
+	// MaxScrollbackLines is the optional maximum number of physical lines
+	// retained in scrollback. Nil retains libghostty's default.
+	MaxScrollbackLines *uint
 
 	// Effect handlers applied after terminal creation.
 	onWritePty         WritePtyFn
 	onBell             BellFn
 	onClipboardWrite   ClipboardWriteFn
 	onTitleChanged     TitleChangedFn
+	onPwdChanged       PwdChangedFn
 	onEnquiry          EnquiryFn
 	onXtversion        XtversionFn
 	onSize             SizeFn
@@ -168,6 +173,12 @@ type ClipboardWriteFn func(t *Terminal, write ClipboardWrite) ClipboardWriteResu
 // C: GhosttyTerminalTitleChangedFn
 type TitleChangedFn func(t *Terminal)
 
+// PwdChangedFn is called when the terminal working directory changes via
+// OSC 7, OSC 9, or OSC 1337 CurrentDir. Query [Terminal.Pwd] in the callback
+// to read the new value.
+// C: GhosttyTerminalPwdChangedFn
+type PwdChangedFn func(t *Terminal)
+
 // EnquiryFn is called when the terminal receives ENQ (0x05).
 // The first parameter is the terminal that triggered the effect.
 // Return the response bytes; nil or empty means no response.
@@ -208,11 +219,20 @@ func WithSize(cols, rows uint16) TerminalOption {
 	}
 }
 
-// WithMaxScrollback sets the maximum number of lines to keep in
-// scrollback history. Defaults to 0 (no scrollback).
-func WithMaxScrollback(lines uint) TerminalOption {
+// WithMaxScrollbackBytes sets the maximum scrollback allocation in bytes.
+// The limit is approximate because libghostty prunes at page granularity.
+func WithMaxScrollbackBytes(bytes uint) TerminalOption {
 	return func(c *TerminalConfig) {
-		c.MaxScrollback = lines
+		c.MaxScrollbackBytes = &bytes
+	}
+}
+
+// WithMaxScrollbackLines sets the maximum number of physical scrollback
+// lines. The limit is approximate because libghostty prunes at page
+// granularity.
+func WithMaxScrollbackLines(lines uint) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.MaxScrollbackLines = &lines
 	}
 }
 
@@ -246,6 +266,14 @@ func WithClipboardWrite(fn ClipboardWriteFn) TerminalOption {
 func WithTitleChanged(fn TitleChangedFn) TerminalOption {
 	return func(c *TerminalConfig) {
 		c.onTitleChanged = fn
+	}
+}
+
+// WithPwdChanged registers an effect handler invoked when the terminal
+// working directory changes via an OSC sequence.
+func WithPwdChanged(fn PwdChangedFn) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.onPwdChanged = fn
 	}
 }
 
@@ -304,15 +332,39 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 		opt(&cfg)
 	}
 
-	options := C.GhosttyTerminalOptions{
-		cols:           C.uint16_t(cfg.Cols),
-		rows:           C.uint16_t(cfg.Rows),
-		max_scrollback: C.size_t(cfg.MaxScrollback),
+	var cterm C.GhosttyTerminal
+	if err := resultError(C.ghostty_terminal_new(
+		nil,
+		&cterm,
+		C.uint16_t(cfg.Cols),
+		C.uint16_t(cfg.Rows),
+	)); err != nil {
+		return nil, err
 	}
 
-	var cterm C.GhosttyTerminal
-	if err := resultError(C.ghostty_terminal_new(nil, &cterm, options)); err != nil {
-		return nil, err
+	// Apply explicitly configured scrollback limits. Omitting either option
+	// retains libghostty's constructor default for that limit.
+	if cfg.MaxScrollbackBytes != nil {
+		maxBytes := C.size_t(*cfg.MaxScrollbackBytes)
+		if err := resultError(C.ghostty_terminal_set(
+			cterm,
+			C.GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES,
+			unsafe.Pointer(&maxBytes),
+		)); err != nil {
+			C.ghostty_terminal_free(cterm)
+			return nil, err
+		}
+	}
+	if cfg.MaxScrollbackLines != nil {
+		maxLines := C.size_t(*cfg.MaxScrollbackLines)
+		if err := resultError(C.ghostty_terminal_set(
+			cterm,
+			C.GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES,
+			unsafe.Pointer(&maxLines),
+		)); err != nil {
+			C.ghostty_terminal_free(cterm)
+			return nil, err
+		}
 	}
 
 	t := &Terminal{
@@ -321,6 +373,7 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 		onBell:             cfg.onBell,
 		onClipboardWrite:   cfg.onClipboardWrite,
 		onTitleChanged:     cfg.onTitleChanged,
+		onPwdChanged:       cfg.onPwdChanged,
 		onEnquiry:          cfg.onEnquiry,
 		onXtversion:        cfg.onXtversion,
 		onSize:             cfg.onSize,
@@ -373,6 +426,85 @@ func (t *Terminal) Resize(cols, rows uint16, cellWidthPx, cellHeightPx uint32) e
 	))
 }
 
+// TerminalCompressionMode controls how much scrollback compression work a
+// call to [Terminal.Compress] performs.
+// C: GhosttyTerminalCompressionMode
+type TerminalCompressionMode int
+
+const (
+	// TerminalCompressionIncremental performs one bounded step suitable for
+	// an idle callback.
+	TerminalCompressionIncremental TerminalCompressionMode = C.GHOSTTY_TERMINAL_COMPRESSION_MODE_INCREMENTAL
+
+	// TerminalCompressionFull synchronously scans all eligible pages.
+	TerminalCompressionFull TerminalCompressionMode = C.GHOSTTY_TERMINAL_COMPRESSION_MODE_FULL
+)
+
+// TerminalCompressionResult describes whether a compression pass needs more
+// work.
+// C: GhosttyTerminalCompressionResult
+type TerminalCompressionResult int
+
+const (
+	// TerminalCompressionUnsupported means retained-mapping reclamation is
+	// unavailable on this target.
+	TerminalCompressionUnsupported TerminalCompressionResult = C.GHOSTTY_TERMINAL_COMPRESSION_RESULT_UNSUPPORTED
+
+	// TerminalCompressionPending means another incremental step should run
+	// while the terminal remains idle.
+	TerminalCompressionPending TerminalCompressionResult = C.GHOSTTY_TERMINAL_COMPRESSION_RESULT_PENDING
+
+	// TerminalCompressionComplete means no continuation is needed until the
+	// activity token changes.
+	TerminalCompressionComplete TerminalCompressionResult = C.GHOSTTY_TERMINAL_COMPRESSION_RESULT_COMPLETE
+)
+
+// TerminalCursorStyle identifies the visual style used when DECSCUSR resets
+// the cursor.
+// C: GhosttyTerminalCursorStyle
+type TerminalCursorStyle int
+
+const (
+	// TerminalCursorStyleBar is a vertical bar cursor.
+	TerminalCursorStyleBar TerminalCursorStyle = C.GHOSTTY_TERMINAL_CURSOR_STYLE_BAR
+
+	// TerminalCursorStyleBlock is a filled block cursor.
+	TerminalCursorStyleBlock TerminalCursorStyle = C.GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK
+
+	// TerminalCursorStyleUnderline is an underline cursor.
+	TerminalCursorStyleUnderline TerminalCursorStyle = C.GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE
+
+	// TerminalCursorStyleBlockHollow is a hollow block cursor.
+	TerminalCursorStyleBlockHollow TerminalCursorStyle = C.GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK_HOLLOW
+)
+
+// CompressionActivity returns the opaque scrollback-compression activity
+// token. Only equality comparisons between tokens are meaningful.
+func (t *Terminal) CompressionActivity() (uint64, error) {
+	var activity C.uint64_t
+	if err := resultError(C.ghostty_terminal_compression_activity(
+		t.ptr,
+		&activity,
+	)); err != nil {
+		return 0, err
+	}
+	return uint64(activity), nil
+}
+
+// Compress performs caller-driven scrollback compression. Calls must be
+// serialized with all other access to the terminal.
+func (t *Terminal) Compress(mode TerminalCompressionMode) (TerminalCompressionResult, error) {
+	var result C.GhosttyTerminalCompressionResult
+	if err := resultError(C.ghostty_terminal_compress(
+		t.ptr,
+		C.GhosttyTerminalCompressionMode(mode),
+		&result,
+	)); err != nil {
+		return 0, err
+	}
+	return TerminalCompressionResult(result), nil
+}
+
 // VTWrite feeds raw VT-encoded bytes through the terminal's parser,
 // updating terminal state. Malformed input is handled gracefully and
 // will not cause an error. Effect callbacks run synchronously before
@@ -419,6 +551,10 @@ const (
 
 	// ScrollViewportDelta scrolls by a delta amount (up is negative).
 	ScrollViewportDelta ScrollViewportTag = C.GHOSTTY_SCROLL_VIEWPORT_DELTA
+
+	// ScrollViewportRow scrolls to an absolute row offset in the same
+	// coordinate space as [Scrollbar.Offset].
+	ScrollViewportRow ScrollViewportTag = C.GHOSTTY_SCROLL_VIEWPORT_ROW
 )
 
 // ScrollViewport scrolls the terminal viewport to the top of scrollback.
@@ -443,6 +579,16 @@ func (t *Terminal) ScrollViewportDelta(delta int) {
 	sv.tag = C.GHOSTTY_SCROLL_VIEWPORT_DELTA
 	// Set the delta in the value union. The delta field is at offset 0.
 	*(*C.intptr_t)(unsafe.Pointer(&sv.value[0])) = C.intptr_t(delta)
+	C.ghostty_terminal_scroll_viewport(t.ptr, sv)
+}
+
+// ScrollViewportRow scrolls the viewport to an absolute row offset from the
+// top of the scrollable area. The value is clamped to the available range.
+func (t *Terminal) ScrollViewportRow(row uint) {
+	var sv C.GhosttyTerminalScrollViewport
+	sv.tag = C.GHOSTTY_SCROLL_VIEWPORT_ROW
+	// Set the row in the value union. The row field is at offset 0.
+	*(*C.size_t)(unsafe.Pointer(&sv.value[0])) = C.size_t(row)
 	C.ghostty_terminal_scroll_viewport(t.ptr, sv)
 }
 

@@ -16,6 +16,7 @@ extern void goWritePtyTrampoline(GhosttyTerminal, void*, uint8_t*, size_t);
 extern void goBellTrampoline(GhosttyTerminal, void*);
 extern GhosttyClipboardWriteResult goClipboardWriteTrampoline(GhosttyTerminal, void*, GhosttyClipboardWrite*);
 extern void goTitleChangedTrampoline(GhosttyTerminal, void*);
+extern void goPwdChangedTrampoline(GhosttyTerminal, void*);
 extern GhosttyString goEnquiryTrampoline(GhosttyTerminal, void*);
 extern GhosttyString goXtversionTrampoline(GhosttyTerminal, void*);
 extern bool goSizeTrampoline(GhosttyTerminal, void*, GhosttySizeReportSize*);
@@ -36,6 +37,9 @@ static inline GhosttyResult set_clipboard_write(GhosttyTerminal t) {
 }
 static inline GhosttyResult set_title_changed(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_TITLE_CHANGED, (const void*)goTitleChangedTrampoline);
+}
+static inline GhosttyResult set_pwd_changed(GhosttyTerminal t) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_PWD_CHANGED, (const void*)goPwdChangedTrampoline);
 }
 static inline GhosttyResult set_enquiry(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_ENQUIRY, (const void*)goEnquiryTrampoline);
@@ -87,6 +91,11 @@ func (t *Terminal) syncEffects() {
 		C.set_title_changed(t.ptr)
 	} else {
 		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_TITLE_CHANGED)
+	}
+	if t.onPwdChanged != nil {
+		C.set_pwd_changed(t.ptr)
+	} else {
+		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_PWD_CHANGED)
 	}
 	if t.onEnquiry != nil {
 		C.set_enquiry(t.ptr)
@@ -215,6 +224,14 @@ func goTitleChangedTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer) {
 	t := terminalFromUserdata(userdata)
 	if t.onTitleChanged != nil {
 		t.onTitleChanged(t)
+	}
+}
+
+//export goPwdChangedTrampoline
+func goPwdChangedTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer) {
+	t := terminalFromUserdata(userdata)
+	if t.onPwdChanged != nil {
+		t.onPwdChanged(t)
 	}
 }
 

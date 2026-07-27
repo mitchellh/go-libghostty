@@ -40,10 +40,10 @@ func cursorStyleName(s libghostty.CursorVisualStyle) string {
 }
 
 func main() {
-	// 1. Create terminal 40x5 with scrollback 10000.
+	// 1. Create terminal 40x5 with up to 10000 scrollback lines.
 	term, err := libghostty.NewTerminal(
 		libghostty.WithSize(40, 5),
-		libghostty.WithMaxScrollback(10000),
+		libghostty.WithMaxScrollbackLines(10000),
 	)
 	if err != nil {
 		log.Fatal(err)

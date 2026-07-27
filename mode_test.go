@@ -21,3 +21,18 @@ func TestModeValueDEC(t *testing.T) {
 		t.Fatal("expected DEC private mode")
 	}
 }
+
+func TestNewModeAndReportEncode(t *testing.T) {
+	mode := NewMode(25, false)
+	if mode != ModeCursorVisible {
+		t.Fatalf("expected cursor-visible mode, got %d", mode)
+	}
+
+	report, err := ModeReportEncode(mode, ModeReportSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "\x1b[?25;1$y"; string(report) != want {
+		t.Fatalf("expected %q, got %q", want, report)
+	}
+}

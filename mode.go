@@ -5,21 +5,29 @@ package libghostty
 */
 import "C"
 
+import "unsafe"
+
 // Mode is a packed 16-bit terminal mode identifier. It encodes a mode
 // value (bits 0–14) and an ANSI flag (bit 15). DEC private modes have
 // the ANSI bit clear; standard ANSI modes have it set.
 // C: GhosttyMode
 type Mode uint16
 
+// NewMode packs a numeric mode value and ANSI flag into a Mode. Values are
+// limited to 15 bits, matching GhosttyMode.
+func NewMode(value uint16, ansi bool) Mode {
+	return Mode(C.ghostty_mode_new(C.uint16_t(value), C.bool(ansi)))
+}
+
 // Value returns the numeric mode value (0–32767).
 func (m Mode) Value() uint16 {
-	return uint16(m) & 0x7FFF
+	return uint16(C.ghostty_mode_value(C.GhosttyMode(m)))
 }
 
 // ANSI reports whether this is a standard ANSI mode. If false, it is
 // a DEC private mode (?-prefixed).
 func (m Mode) ANSI() bool {
-	return (m >> 15) != 0
+	return bool(C.ghostty_mode_ansi(C.GhosttyMode(m)))
 }
 
 // ANSI modes.
@@ -171,3 +179,35 @@ const (
 	// ModeReportPermanentlyReset means the mode is permanently reset.
 	ModeReportPermanentlyReset ModeReportState = C.GHOSTTY_MODE_REPORT_PERMANENTLY_RESET
 )
+
+// ModeReportEncode encodes a DECRPM response for mode and state.
+func ModeReportEncode(mode Mode, state ModeReportState) ([]byte, error) {
+	var buf [32]byte
+	var written C.size_t
+	result := C.ghostty_mode_report_encode(
+		C.GhosttyMode(mode),
+		C.GhosttyModeReportState(state),
+		(*C.char)(unsafe.Pointer(&buf[0])),
+		C.size_t(len(buf)),
+		&written,
+	)
+	if result == C.GHOSTTY_SUCCESS {
+		return append([]byte(nil), buf[:int(written)]...), nil
+	}
+	if result != C.GHOSTTY_OUT_OF_SPACE {
+		return nil, &Error{Result: Result(result)}
+	}
+
+	out := make([]byte, int(written))
+	var outWritten C.size_t
+	if err := resultError(C.ghostty_mode_report_encode(
+		C.GhosttyMode(mode),
+		C.GhosttyModeReportState(state),
+		(*C.char)(unsafe.Pointer(&out[0])),
+		C.size_t(len(out)),
+		&outWritten,
+	)); err != nil {
+		return nil, err
+	}
+	return out[:int(outWritten)], nil
+}
