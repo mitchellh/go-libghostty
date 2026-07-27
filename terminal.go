@@ -28,16 +28,18 @@ type Terminal struct {
 	// dispatch to the appropriate Go effect handler.
 	handle cgo.Handle
 
-	onWritePty         WritePtyFn
-	onBell             BellFn
-	onClipboardWrite   ClipboardWriteFn
-	onTitleChanged     TitleChangedFn
-	onPwdChanged       PwdChangedFn
-	onEnquiry          EnquiryFn
-	onXtversion        XtversionFn
-	onSize             SizeFn
-	onColorScheme      ColorSchemeFn
-	onDeviceAttributes DeviceAttributesFn
+	onWritePty            WritePtyFn
+	onBell                BellFn
+	onClipboardWrite      ClipboardWriteFn
+	onDesktopNotification DesktopNotificationFn
+	onTitleChanged        TitleChangedFn
+	onPwdChanged          PwdChangedFn
+	onProgressReport      ProgressReportFn
+	onEnquiry             EnquiryFn
+	onXtversion           XtversionFn
+	onSize                SizeFn
+	onColorScheme         ColorSchemeFn
+	onDeviceAttributes    DeviceAttributesFn
 
 	// effectBuf holds C-allocated memory for the most recent response
 	// returned by an effect trampoline (e.g. enquiry, xtversion).
@@ -69,16 +71,18 @@ type TerminalConfig struct {
 	MaxScrollbackLines *uint
 
 	// Effect handlers applied after terminal creation.
-	onWritePty         WritePtyFn
-	onBell             BellFn
-	onClipboardWrite   ClipboardWriteFn
-	onTitleChanged     TitleChangedFn
-	onPwdChanged       PwdChangedFn
-	onEnquiry          EnquiryFn
-	onXtversion        XtversionFn
-	onSize             SizeFn
-	onColorScheme      ColorSchemeFn
-	onDeviceAttributes DeviceAttributesFn
+	onWritePty            WritePtyFn
+	onBell                BellFn
+	onClipboardWrite      ClipboardWriteFn
+	onDesktopNotification DesktopNotificationFn
+	onTitleChanged        TitleChangedFn
+	onPwdChanged          PwdChangedFn
+	onProgressReport      ProgressReportFn
+	onEnquiry             EnquiryFn
+	onXtversion           XtversionFn
+	onSize                SizeFn
+	onColorScheme         ColorSchemeFn
+	onDeviceAttributes    DeviceAttributesFn
 }
 
 // WritePtyFn is called when the terminal writes data back to the pty
@@ -168,6 +172,24 @@ const (
 // C: GhosttyTerminalClipboardWriteFn
 type ClipboardWriteFn func(t *Terminal, write ClipboardWrite) ClipboardWriteResult
 
+// TerminalDesktopNotification is a request from the running program to show a
+// desktop notification. Title is empty for protocols such as OSC 9 that
+// provide only a body. Both strings are copied into Go-owned memory before
+// the callback runs and may be retained.
+// C: GhosttyTerminalDesktopNotification
+type TerminalDesktopNotification struct {
+	// Title is the notification title, or empty when the protocol omits it.
+	Title string
+
+	// Body is the notification body.
+	Body string
+}
+
+// DesktopNotificationFn is called synchronously when the terminal receives
+// a desktop notification request via OSC 9 or OSC 777.
+// C: GhosttyTerminalDesktopNotificationFn
+type DesktopNotificationFn func(t *Terminal, notification TerminalDesktopNotification)
+
 // TitleChangedFn is called when the terminal title changes via OSC 0/2.
 // The parameter is the terminal that triggered the effect.
 // C: GhosttyTerminalTitleChangedFn
@@ -178,6 +200,44 @@ type TitleChangedFn func(t *Terminal)
 // to read the new value.
 // C: GhosttyTerminalPwdChangedFn
 type PwdChangedFn func(t *Terminal)
+
+// TerminalProgressState identifies the state of a progress report emitted by
+// the running program.
+// C: GhosttyTerminalProgressState
+type TerminalProgressState int
+
+const (
+	// TerminalProgressStateRemove requests removal of any progress indication.
+	TerminalProgressStateRemove TerminalProgressState = C.GHOSTTY_TERMINAL_PROGRESS_STATE_REMOVE
+
+	// TerminalProgressStateSet reports determinate progress.
+	TerminalProgressStateSet TerminalProgressState = C.GHOSTTY_TERMINAL_PROGRESS_STATE_SET
+
+	// TerminalProgressStateError reports failed progress.
+	TerminalProgressStateError TerminalProgressState = C.GHOSTTY_TERMINAL_PROGRESS_STATE_ERROR
+
+	// TerminalProgressStateIndeterminate reports progress without a percentage.
+	TerminalProgressStateIndeterminate TerminalProgressState = C.GHOSTTY_TERMINAL_PROGRESS_STATE_INDETERMINATE
+
+	// TerminalProgressStatePause reports paused progress.
+	TerminalProgressStatePause TerminalProgressState = C.GHOSTTY_TERMINAL_PROGRESS_STATE_PAUSE
+)
+
+// TerminalProgressReport is a progress update emitted by the running program
+// via OSC 9;4.
+// C: GhosttyTerminalProgressReport
+type TerminalProgressReport struct {
+	// State is the literal progress state reported by the program.
+	State TerminalProgressState
+
+	// Progress is a percentage from 0 through 100, or -1 when omitted.
+	Progress int8
+}
+
+// ProgressReportFn is called synchronously when the terminal receives a
+// progress report via OSC 9;4.
+// C: GhosttyTerminalProgressReportFn
+type ProgressReportFn func(t *Terminal, report TerminalProgressReport)
 
 // EnquiryFn is called when the terminal receives ENQ (0x05).
 // The first parameter is the terminal that triggered the effect.
@@ -261,6 +321,14 @@ func WithClipboardWrite(fn ClipboardWriteFn) TerminalOption {
 	}
 }
 
+// WithDesktopNotification registers an effect handler invoked for desktop
+// notification requests received via OSC 9 or OSC 777.
+func WithDesktopNotification(fn DesktopNotificationFn) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.onDesktopNotification = fn
+	}
+}
+
 // WithTitleChanged registers an effect handler invoked when the
 // terminal title changes via OSC 0 or OSC 2.
 func WithTitleChanged(fn TitleChangedFn) TerminalOption {
@@ -274,6 +342,14 @@ func WithTitleChanged(fn TitleChangedFn) TerminalOption {
 func WithPwdChanged(fn PwdChangedFn) TerminalOption {
 	return func(c *TerminalConfig) {
 		c.onPwdChanged = fn
+	}
+}
+
+// WithProgressReport registers an effect handler invoked for progress reports
+// received via OSC 9;4.
+func WithProgressReport(fn ProgressReportFn) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.onProgressReport = fn
 	}
 }
 
@@ -368,17 +444,19 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 	}
 
 	t := &Terminal{
-		ptr:                cterm,
-		onWritePty:         cfg.onWritePty,
-		onBell:             cfg.onBell,
-		onClipboardWrite:   cfg.onClipboardWrite,
-		onTitleChanged:     cfg.onTitleChanged,
-		onPwdChanged:       cfg.onPwdChanged,
-		onEnquiry:          cfg.onEnquiry,
-		onXtversion:        cfg.onXtversion,
-		onSize:             cfg.onSize,
-		onColorScheme:      cfg.onColorScheme,
-		onDeviceAttributes: cfg.onDeviceAttributes,
+		ptr:                   cterm,
+		onWritePty:            cfg.onWritePty,
+		onBell:                cfg.onBell,
+		onClipboardWrite:      cfg.onClipboardWrite,
+		onDesktopNotification: cfg.onDesktopNotification,
+		onTitleChanged:        cfg.onTitleChanged,
+		onPwdChanged:          cfg.onPwdChanged,
+		onProgressReport:      cfg.onProgressReport,
+		onEnquiry:             cfg.onEnquiry,
+		onXtversion:           cfg.onXtversion,
+		onSize:                cfg.onSize,
+		onColorScheme:         cfg.onColorScheme,
+		onDeviceAttributes:    cfg.onDeviceAttributes,
 	}
 
 	// Always set userdata to our handle so trampolines can find us.

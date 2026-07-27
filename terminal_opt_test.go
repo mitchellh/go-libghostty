@@ -242,6 +242,101 @@ func TestTerminalSetEffectClipboardWrite(t *testing.T) {
 	}
 }
 
+func TestTerminalDesktopNotificationEffect(t *testing.T) {
+	var notifications []TerminalDesktopNotification
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithDesktopNotification(func(_ *Terminal, notification TerminalDesktopNotification) {
+			notifications = append(notifications, notification)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// OSC 777 preserves its separate title and body, including when the
+	// sequence arrives across multiple VT writes.
+	term.VTWrite([]byte("\x1b]777;notify;Codex;"))
+	if len(notifications) != 0 {
+		t.Fatalf("expected incomplete notification to remain buffered, got %d", len(notifications))
+	}
+	term.VTWrite([]byte("Needs attention\x1b\\"))
+	if len(notifications) != 1 {
+		t.Fatalf("expected 1 desktop notification, got %d", len(notifications))
+	}
+	if got := notifications[0]; got.Title != "Codex" || got.Body != "Needs attention" {
+		t.Fatalf("unexpected desktop notification: %+v", got)
+	}
+
+	// OSC 9 has no title and preserves its body.
+	term.VTWrite([]byte("\x1b]9;Build complete\x07"))
+	if len(notifications) != 2 {
+		t.Fatalf("expected 2 desktop notifications, got %d", len(notifications))
+	}
+	if got := notifications[1]; got.Title != "" || got.Body != "Build complete" {
+		t.Fatalf("unexpected OSC 9 desktop notification: %+v", got)
+	}
+
+	// Callback strings are copied and remain valid after the parser reuses its
+	// borrowed input buffer for later terminal writes.
+	if got := notifications[0]; got.Title != "Codex" || got.Body != "Needs attention" {
+		t.Fatalf("expected retained desktop notification, got %+v", got)
+	}
+
+	term.SetEffectDesktopNotification(nil)
+	term.VTWrite([]byte("\x1b]9;Ignored\x07"))
+	if len(notifications) != 2 {
+		t.Fatalf("expected callback to remain cleared, got %d notifications", len(notifications))
+	}
+}
+
+func TestTerminalProgressReportEffect(t *testing.T) {
+	var reports []TerminalProgressReport
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithProgressReport(func(_ *Terminal, report TerminalProgressReport) {
+			reports = append(reports, report)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	tests := []struct {
+		sequence string
+		state    TerminalProgressState
+		progress int8
+	}{
+		{"\x1b]9;4;0;\x1b\\", TerminalProgressStateRemove, -1},
+		{"\x1b]9;4;1;42\x07", TerminalProgressStateSet, 42},
+		{"\x1b]9;4;2;7\x1b\\", TerminalProgressStateError, 7},
+		{"\x1b]9;4;3\x1b\\", TerminalProgressStateIndeterminate, -1},
+		{"\x1b]9;4;4;75\x1b\\", TerminalProgressStatePause, 75},
+	}
+	for i, test := range tests {
+		midpoint := len(test.sequence) / 2
+		term.VTWrite([]byte(test.sequence[:midpoint]))
+		if len(reports) != i {
+			t.Fatalf("expected split report %d to remain buffered, got %d reports", i, len(reports))
+		}
+		term.VTWrite([]byte(test.sequence[midpoint:]))
+		if len(reports) != i+1 {
+			t.Fatalf("expected report %d, got %d reports", i, len(reports))
+		}
+		if got := reports[i]; got.State != test.state || got.Progress != test.progress {
+			t.Fatalf("unexpected progress report %d: %+v", i, got)
+		}
+	}
+
+	term.SetEffectProgressReport(nil)
+	term.VTWrite([]byte("\x1b]9;4;1;90\x1b\\"))
+	if len(reports) != len(tests) {
+		t.Fatalf("expected callback to remain cleared, got %d reports", len(reports))
+	}
+}
+
 func TestTerminalWithWritePty(t *testing.T) {
 	var received []byte
 	term, err := NewTerminal(WithSize(80, 24), WithWritePty(func(_ *Terminal, data []byte) {

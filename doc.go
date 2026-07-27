@@ -47,8 +47,9 @@
 //
 // The terminal communicates side-effects back to the host through
 // effect callbacks. Register them at creation time with functional
-// options like [WithWritePty], [WithBell], and [WithEnquiry], or
-// on a live terminal with [Terminal.SetEffectWritePty] and friends.
+// options like [WithWritePty], [WithDesktopNotification], and
+// [WithProgressReport], or on a live terminal with
+// [Terminal.SetEffectWritePty] and friends.
 //
 // Effect callbacks run synchronously during [Terminal.VTWrite]. They
 // must not call [Terminal.VTWrite] on the same terminal and should avoid

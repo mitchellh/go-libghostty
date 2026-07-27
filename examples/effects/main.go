@@ -1,8 +1,9 @@
 // Example program demonstrating terminal effect callbacks.
 //
-// It registers write_pty, bell, title_changed, and clipboard_write effect
-// handlers, then feeds VT sequences that trigger each one. Output shows how
-// the callbacks fire and how terminal state can be queried from within them.
+// It registers a representative set of effects, including desktop
+// notifications and progress reports, then feeds VT sequences that trigger
+// each one. Output shows how the callbacks fire and how terminal state can be
+// queried from within them.
 package main
 
 import (
@@ -39,6 +40,16 @@ func main() {
 			return ghostty.ClipboardWriteSuccess
 		}),
 
+		// desktop_notification: called for OSC 9 and OSC 777 requests.
+		ghostty.WithDesktopNotification(func(_ *ghostty.Terminal, notification ghostty.TerminalDesktopNotification) {
+			fmt.Printf("desktop_notification: title=%q body=%q\n", notification.Title, notification.Body)
+		}),
+
+		// progress_report: called for ConEmu OSC 9;4 progress updates.
+		ghostty.WithProgressReport(func(_ *ghostty.Terminal, report ghostty.TerminalProgressReport) {
+			fmt.Printf("progress_report: state=%d progress=%d\n", report.State, report.Progress)
+		}),
+
 		// title_changed: called when the terminal title changes via OSC 0/2.
 		// The terminal is passed directly as a parameter.
 		ghostty.WithTitleChanged(func(t *ghostty.Terminal) {
@@ -65,6 +76,12 @@ func main() {
 
 	// OSC 52 (set clipboard) → triggers clipboard_write with decoded data.
 	term.VTWrite([]byte("\x1b]52;c;SGVsbG8gY2xpcGJvYXJk\x1b\\"))
+
+	// OSC 777 (desktop notification) → triggers desktop_notification.
+	term.VTWrite([]byte("\x1b]777;notify;Build;Complete\x1b\\"))
+
+	// OSC 9;4 (42% progress) → triggers progress_report.
+	term.VTWrite([]byte("\x1b]9;4;1;42\x1b\\"))
 
 	// Another BEL → triggers bell handler again.
 	term.VTWrite([]byte{0x07})
