@@ -2,12 +2,114 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
+
+// Returning small result structs by value keeps cgo from forcing every C out
+// parameter onto the Go heap. These are binding-only adapters; the underlying
+// libghostty functions and ownership rules remain unchanged.
+typedef struct {
+	GhosttyResult result;
+	uint8_t* ptr;
+	size_t len;
+} ghostty_go_snapshot_encode_alloc_result;
+
+static inline ghostty_go_snapshot_encode_alloc_result
+ghostty_go_snapshot_encode_alloc(GhosttyTerminal terminal) {
+	ghostty_go_snapshot_encode_alloc_result out = {
+		.result = GHOSTTY_SUCCESS,
+		.ptr = NULL,
+		.len = 0,
+	};
+	out.result = ghostty_snapshot_encode_alloc(
+		terminal,
+		NULL,
+		&out.ptr,
+		&out.len);
+	return out;
+}
+
+typedef struct {
+	GhosttyResult result;
+	size_t written;
+} ghostty_go_snapshot_encode_buf_result;
+
+static inline ghostty_go_snapshot_encode_buf_result
+ghostty_go_snapshot_encode_buf(
+	GhosttyTerminal terminal,
+	uint8_t* buf,
+	size_t len
+) {
+	ghostty_go_snapshot_encode_buf_result out = {
+		.result = GHOSTTY_SUCCESS,
+		.written = 0,
+	};
+	out.result = ghostty_snapshot_encode_buf(
+		terminal,
+		buf,
+		len,
+		&out.written);
+	return out;
+}
+
+typedef struct {
+	GhosttyResult result;
+	GhosttySnapshotDecoder decoder;
+} ghostty_go_snapshot_decoder_result;
+
+static inline ghostty_go_snapshot_decoder_result
+ghostty_go_snapshot_decoder_new(GhosttyReader reader) {
+	ghostty_go_snapshot_decoder_result out = {
+		.result = GHOSTTY_SUCCESS,
+		.decoder = NULL,
+	};
+	out.result = ghostty_snapshot_decoder_new(NULL, &out.decoder, reader);
+	return out;
+}
+
+static inline ghostty_go_snapshot_decoder_result
+ghostty_go_snapshot_decoder_new_buf(const uint8_t* ptr, size_t len) {
+	ghostty_go_snapshot_decoder_result out = {
+		.result = GHOSTTY_SUCCESS,
+		.decoder = NULL,
+	};
+	out.result = ghostty_snapshot_decoder_new_buf(
+		NULL,
+		&out.decoder,
+		ptr,
+		len);
+	return out;
+}
+
+typedef struct {
+	GhosttyResult result;
+	GhosttyTerminal terminal;
+} ghostty_go_snapshot_decode_result;
+
+static inline ghostty_go_snapshot_decode_result
+ghostty_go_snapshot_decoder_ready(GhosttySnapshotDecoder decoder) {
+	ghostty_go_snapshot_decode_result out = {
+		.result = GHOSTTY_SUCCESS,
+		.terminal = NULL,
+	};
+	out.result = ghostty_snapshot_decoder_ready(decoder, &out.terminal);
+	return out;
+}
+
+static inline ghostty_go_snapshot_decode_result
+ghostty_go_snapshot_decoder_decode(GhosttySnapshotDecoder decoder) {
+	ghostty_go_snapshot_decode_result out = {
+		.result = GHOSTTY_SUCCESS,
+		.terminal = NULL,
+	};
+	out.result = ghostty_snapshot_decoder_decode(decoder, &out.terminal);
+	return out;
+}
 */
 import "C"
 
 import (
 	"errors"
 	"io"
+	"runtime"
 	"unsafe"
 )
 
@@ -73,29 +175,32 @@ type SnapshotDecoder struct {
 	// the C decoder stores its GhosttyReader descriptor by value.
 	reader *ghosttyReaderBridge
 
-	// sourcePtr is a C-owned copy used by NewSnapshotDecoderBytes. C retains
-	// this borrowed pointer until FINISH or decoder destruction.
+	// sourceBytes and sourcePin keep the zero-copy input used by
+	// NewSnapshotDecoderBytes alive, immovable, and therefore legal for C to
+	// retain across calls. The pin is released at FINISH or decoder destruction.
+	sourceBytes  []byte
+	sourcePin    runtime.Pinner
+	sourcePinned bool
+
+	// sourcePtr is the C-owned input used by NewSnapshotDecoderBytesCopy. C
+	// retains this borrowed pointer until FINISH or decoder destruction.
 	sourcePtr unsafe.Pointer
 	sourceLen uintptr
 }
 
 // Snapshot encodes a complete terminal snapshot and returns a Go-owned copy.
-// Calls must be serialized with every other operation on t.
+// Calls must be serialized with every other operation on t. Callers taking
+// repeated snapshots can use [Terminal.SnapshotBuf] with a reusable buffer to
+// avoid the result allocation and copy.
 // C: ghostty_snapshot_encode_alloc
 func (t *Terminal) Snapshot() ([]byte, error) {
-	var outPtr *C.uint8_t
-	var outLen C.size_t
-	if err := resultError(C.ghostty_snapshot_encode_alloc(
-		t.ptr,
-		nil,
-		&outPtr,
-		&outLen,
-	)); err != nil {
+	result := C.ghostty_go_snapshot_encode_alloc(t.ptr)
+	if err := resultError(result.result); err != nil {
 		return nil, err
 	}
-	defer C.ghostty_free(nil, outPtr, outLen)
+	defer C.ghostty_free(nil, result.ptr, result.len)
 
-	length, valid := ghosttySizeToInt(outLen)
+	length, valid := ghosttySizeToInt(result.len)
 	if !valid {
 		return nil, &Error{Result: ResultLimitExceeded}
 	}
@@ -104,7 +209,7 @@ func (t *Terminal) Snapshot() ([]byte, error) {
 	}
 
 	out := make([]byte, length)
-	copy(out, unsafe.Slice((*byte)(unsafe.Pointer(outPtr)), length))
+	copy(out, unsafe.Slice((*byte)(unsafe.Pointer(result.ptr)), length))
 	return out, nil
 }
 
@@ -118,18 +223,16 @@ func (t *Terminal) SnapshotBuf(buf []byte) (int, error) {
 		ptr = (*C.uint8_t)(unsafe.Pointer(&buf[0]))
 	}
 
-	var written C.size_t
-	result := C.ghostty_snapshot_encode_buf(
+	result := C.ghostty_go_snapshot_encode_buf(
 		t.ptr,
 		ptr,
 		C.size_t(len(buf)),
-		&written,
 	)
-	length, valid := ghosttySizeToInt(written)
+	length, valid := ghosttySizeToInt(result.written)
 	if !valid {
 		return 0, &Error{Result: ResultLimitExceeded}
 	}
-	return length, resultError(result)
+	return length, resultError(result.result)
 }
 
 // SnapshotWriteTo encodes a complete terminal snapshot directly to w. The
@@ -157,20 +260,47 @@ func NewSnapshotDecoder(r io.Reader) (*SnapshotDecoder, error) {
 		return nil, err
 	}
 
-	var ptr C.GhosttySnapshotDecoder
-	if err := resultError(C.ghostty_snapshot_decoder_new(nil, &ptr, reader)); err != nil {
+	result := C.ghostty_go_snapshot_decoder_new(reader)
+	if err := resultError(result.result); err != nil {
 		bridge.close()
 		return nil, err
 	}
 
-	return &SnapshotDecoder{ptr: ptr, reader: bridge}, nil
+	return &SnapshotDecoder{ptr: result.decoder, reader: bridge}, nil
 }
 
-// NewSnapshotDecoderBytes creates a snapshot decoder over a C-owned copy of
-// data. Copying is required because libghostty retains the source pointer
-// across calls and C must not retain a pointer into Go memory.
+// NewSnapshotDecoderBytes creates a zero-copy snapshot decoder over data. The
+// decoder pins the byte slice because libghostty retains its source pointer
+// across calls. The caller must not modify data until the decoder reaches
+// FINISH through [SnapshotDecoder.Decode] or [SnapshotDecoder.Next], or until
+// the decoder is closed.
 // C: ghostty_snapshot_decoder_new_buf
 func NewSnapshotDecoderBytes(data []byte) (*SnapshotDecoder, error) {
+	d := &SnapshotDecoder{sourceBytes: data}
+	var source *C.uint8_t
+	if len(data) > 0 {
+		d.sourcePin.Pin(&data[0])
+		d.sourcePinned = true
+		source = (*C.uint8_t)(unsafe.Pointer(&data[0]))
+	}
+
+	result := C.ghostty_go_snapshot_decoder_new_buf(source, C.size_t(len(data)))
+	runtime.KeepAlive(data)
+	if err := resultError(result.result); err != nil {
+		d.releaseSource()
+		return nil, err
+	}
+
+	d.ptr = result.decoder
+	return d, nil
+}
+
+// NewSnapshotDecoderBytesCopy creates a snapshot decoder over a private copy
+// of data. Unlike [NewSnapshotDecoderBytes], the caller may modify or release
+// data immediately after this function returns. Prefer the zero-copy form for
+// immutable snapshot input, especially for large histories.
+// C: ghostty_snapshot_decoder_new_buf
+func NewSnapshotDecoderBytesCopy(data []byte) (*SnapshotDecoder, error) {
 	length := uintptr(len(data))
 	var source unsafe.Pointer
 	if length > 0 {
@@ -181,19 +311,17 @@ func NewSnapshotDecoderBytes(data []byte) (*SnapshotDecoder, error) {
 		copy(unsafe.Slice((*byte)(source), len(data)), data)
 	}
 
-	var ptr C.GhosttySnapshotDecoder
-	if err := resultError(C.ghostty_snapshot_decoder_new_buf(
-		nil,
-		&ptr,
+	result := C.ghostty_go_snapshot_decoder_new_buf(
 		(*C.uint8_t)(source),
 		C.size_t(length),
-	)); err != nil {
+	)
+	if err := resultError(result.result); err != nil {
 		Free(source, length)
 		return nil, err
 	}
 
 	return &SnapshotDecoder{
-		ptr:       ptr,
+		ptr:       result.decoder,
 		sourcePtr: source,
 		sourceLen: length,
 	}, nil
@@ -211,6 +339,18 @@ func (d *SnapshotDecoder) Close() {
 	d.ptr = nil
 	d.reader.close()
 	d.reader = nil
+	d.releaseSource()
+}
+
+// releaseSource ends either form of source ownership after libghostty can no
+// longer read the input. It is idempotent because FINISH releases the source
+// before the decoder itself is closed.
+func (d *SnapshotDecoder) releaseSource() {
+	if d.sourcePinned {
+		d.sourcePin.Unpin()
+		d.sourcePinned = false
+	}
+	d.sourceBytes = nil
 	if d.sourcePtr != nil {
 		Free(d.sourcePtr, d.sourceLen)
 		d.sourcePtr = nil
@@ -236,12 +376,11 @@ func (d *SnapshotDecoder) SetMaxContinuationBytes(limit uint) error {
 // then be restored one page at a time with [SnapshotDecoder.Next].
 // C: ghostty_snapshot_decoder_ready
 func (d *SnapshotDecoder) Ready() (*Terminal, error) {
-	var terminal C.GhosttyTerminal
-	result := C.ghostty_snapshot_decoder_ready(d.ptr, &terminal)
-	if err := d.decodeError(result); err != nil {
+	result := C.ghostty_go_snapshot_decoder_ready(d.ptr)
+	if err := d.decodeError(result.result); err != nil {
 		return nil, err
 	}
-	return terminalFromC(terminal, TerminalConfig{}), nil
+	return terminalFromC(result.terminal, TerminalConfig{}), nil
 }
 
 // Next decodes and authenticates one history page. It returns true after a
@@ -254,6 +393,7 @@ func (d *SnapshotDecoder) Next() (bool, error) {
 	case C.GHOSTTY_SUCCESS:
 		return true, nil
 	case C.GHOSTTY_NO_VALUE:
+		d.releaseSource()
 		return false, nil
 	default:
 		return false, d.decodeError(result)
@@ -265,12 +405,12 @@ func (d *SnapshotDecoder) Next() (bool, error) {
 // remain outside the snapshot and can be located with SourceOffset.
 // C: ghostty_snapshot_decoder_decode
 func (d *SnapshotDecoder) Decode() (*Terminal, error) {
-	var terminal C.GhosttyTerminal
-	result := C.ghostty_snapshot_decoder_decode(d.ptr, &terminal)
-	if err := d.decodeError(result); err != nil {
+	result := C.ghostty_go_snapshot_decoder_decode(d.ptr)
+	if err := d.decodeError(result.result); err != nil {
 		return nil, err
 	}
-	return terminalFromC(terminal, TerminalConfig{}), nil
+	d.releaseSource()
+	return terminalFromC(result.terminal, TerminalConfig{}), nil
 }
 
 // Get reads a raw decoder data field into value. The pointer type must match
@@ -300,6 +440,19 @@ func (d *SnapshotDecoder) GetMulti(keys []SnapshotDecoderData, values []unsafe.P
 	for i, key := range keys {
 		cKeys[i] = C.GhosttySnapshotDecoderData(key)
 	}
+
+	// cValuesArray places the output pointers in C-owned memory for the
+	// duration of the call. Explicitly pin every Go target before doing so;
+	// direct cgo arguments are pinned automatically, but nested pointers in a
+	// C array are not. Pin is a no-op for targets already allocated by C.
+	var pinner runtime.Pinner
+	for _, value := range values {
+		if value != nil {
+			pinner.Pin(value)
+		}
+	}
+	defer pinner.Unpin()
+
 	cValues, cValuesSize := cValuesArray(values)
 	defer Free(unsafe.Pointer(cValues), cValuesSize)
 	var cWritten C.size_t

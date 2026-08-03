@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 	"unsafe"
@@ -88,10 +89,10 @@ func TestSnapshotEncodeFormsAndDecode(t *testing.T) {
 		t.Fatal("writer snapshot differs from allocated snapshot")
 	}
 
-	// The byte-slice constructor must copy because C retains the source. Clear
-	// the caller's slice after construction to prove the decoder is independent.
+	// The explicit copying constructor owns an independent source. Clear the
+	// caller's slice after construction to prove that mutation is safe.
 	callerBytes := append([]byte(nil), snapshot...)
-	decoder, err := NewSnapshotDecoderBytes(callerBytes)
+	decoder, err := NewSnapshotDecoderBytesCopy(callerBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,6 +272,36 @@ func TestSnapshotIncrementalDecode(t *testing.T) {
 	}
 	if offset != uint(len(snapshot)) {
 		t.Fatalf("expected FINISH offset %d, got %d", len(snapshot), offset)
+	}
+}
+
+func TestSnapshotDecoderBytesPinLifetime(t *testing.T) {
+	term := newSnapshotTerminal(t)
+	defer term.Close()
+
+	snapshot, err := term.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder, err := NewSnapshotDecoderBytes(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoder.Close()
+	if !decoder.sourcePinned {
+		t.Fatal("byte source is not pinned while libghostty retains it")
+	}
+
+	// Force a collection between construction and decoding to exercise the
+	// cross-call lifetime that requires an explicit runtime.Pinner.
+	runtime.GC()
+	restored, err := decoder.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	if decoder.sourcePinned || decoder.sourceBytes != nil {
+		t.Fatal("byte source remains pinned after FINISH")
 	}
 }
 
