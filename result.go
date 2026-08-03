@@ -13,11 +13,26 @@ import "fmt"
 type Result int
 
 const (
-	ResultSuccess      Result = C.GHOSTTY_SUCCESS
-	ResultOutOfMemory  Result = C.GHOSTTY_OUT_OF_MEMORY
+	// ResultSuccess indicates that an operation completed successfully.
+	ResultSuccess Result = C.GHOSTTY_SUCCESS
+
+	// ResultOutOfMemory indicates that an allocation failed.
+	ResultOutOfMemory Result = C.GHOSTTY_OUT_OF_MEMORY
+
+	// ResultInvalidValue indicates that an argument or encoded value was invalid.
 	ResultInvalidValue Result = C.GHOSTTY_INVALID_VALUE
-	ResultOutOfSpace   Result = C.GHOSTTY_OUT_OF_SPACE
-	ResultNoValue      Result = C.GHOSTTY_NO_VALUE
+
+	// ResultOutOfSpace indicates that a caller-provided buffer was too small.
+	ResultOutOfSpace Result = C.GHOSTTY_OUT_OF_SPACE
+
+	// ResultNoValue indicates that the requested value is unavailable.
+	ResultNoValue Result = C.GHOSTTY_NO_VALUE
+
+	// ResultIOError indicates that external reader or writer I/O failed.
+	ResultIOError Result = C.GHOSTTY_IO_ERROR
+
+	// ResultLimitExceeded indicates that encoded input exceeded a configured limit.
+	ResultLimitExceeded Result = C.GHOSTTY_LIMIT_EXCEEDED
 )
 
 // Error holds a non-success Ghostty result.
@@ -35,6 +50,10 @@ func (e *Error) Error() string {
 		return "ghostty: out of space"
 	case ResultNoValue:
 		return "ghostty: no value"
+	case ResultIOError:
+		return "ghostty: I/O error"
+	case ResultLimitExceeded:
+		return "ghostty: limit exceeded"
 	default:
 		return fmt.Sprintf("ghostty: result=%d", int(e.Result))
 	}

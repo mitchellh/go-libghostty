@@ -155,6 +155,10 @@ const (
 	// TerminalDataScrollbackMaxLines is the configured approximate physical
 	// line limit (size_t), or GHOSTTY_NO_VALUE when unlimited.
 	TerminalDataScrollbackMaxLines TerminalData = C.GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_LINES
+
+	// TerminalDataContinuationMaxBytes is the configured maximum retained VT
+	// continuation size in bytes (size_t). Zero means tracking is disabled.
+	TerminalDataContinuationMaxBytes TerminalData = C.GHOSTTY_TERMINAL_DATA_CONTINUATION_MAX_BYTES
 )
 
 // ActiveScreen returns which screen buffer is currently active.
@@ -307,6 +311,20 @@ func (t *Terminal) CursorY() (uint16, error) {
 		return 0, err
 	}
 	return uint16(v), nil
+}
+
+// ContinuationMaxBytes returns the configured maximum retained VT
+// continuation size. Zero means continuation tracking is disabled.
+func (t *Terminal) ContinuationMaxBytes() (uint, error) {
+	var v C.size_t
+	if err := resultError(C.ghostty_terminal_get(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_CONTINUATION_MAX_BYTES,
+		unsafe.Pointer(&v),
+	)); err != nil {
+		return 0, err
+	}
+	return uint(v), nil
 }
 
 // HeightPx returns the total terminal height in pixels

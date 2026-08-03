@@ -157,6 +157,19 @@ func (t *Terminal) SetColorPalette(palette *Palette) error {
 	))
 }
 
+// SetContinuationMaxBytes sets the maximum number of replay-safe VT
+// continuation bytes retained by the terminal. Tracking must be enabled
+// before writing input that leaves the VT parser or UTF-8 decoder unfinished.
+// A zero limit disables tracking.
+func (t *Terminal) SetContinuationMaxBytes(limit uint) error {
+	v := C.size_t(limit)
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES,
+		unsafe.Pointer(&v),
+	))
+}
+
 // SetDefaultCursorBlink sets whether DECSCUSR reset selects a blinking
 // cursor. Passing nil restores the built-in default of not blinking.
 func (t *Terminal) SetDefaultCursorBlink(blink *bool) error {

@@ -70,6 +70,11 @@ type TerminalConfig struct {
 	// retained in scrollback. Nil retains libghostty's default.
 	MaxScrollbackLines *uint
 
+	// ContinuationMaxBytes is the optional maximum number of replay-safe VT
+	// continuation bytes retained by the terminal. Nil leaves tracking
+	// disabled; zero also explicitly disables tracking.
+	ContinuationMaxBytes *uint
+
 	// Effect handlers applied after terminal creation.
 	onWritePty            WritePtyFn
 	onBell                BellFn
@@ -296,6 +301,14 @@ func WithMaxScrollbackLines(lines uint) TerminalOption {
 	}
 }
 
+// WithContinuationMaxBytes enables replay-safe VT continuation tracking and
+// sets the maximum retained byte count. A zero limit disables tracking.
+func WithContinuationMaxBytes(limit uint) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.ContinuationMaxBytes = &limit
+	}
+}
+
 // WithWritePty registers an effect handler invoked when the terminal
 // writes data back to the pty (e.g. query responses). The data slice
 // is only valid for the duration of the call.
@@ -442,7 +455,31 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 			return nil, err
 		}
 	}
+	if cfg.ContinuationMaxBytes != nil {
+		limit := C.size_t(*cfg.ContinuationMaxBytes)
+		if err := resultError(C.ghostty_terminal_set(
+			cterm,
+			C.GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES,
+			unsafe.Pointer(&limit),
+		)); err != nil {
+			C.ghostty_terminal_free(cterm)
+			return nil, err
+		}
+	}
 
+	t := terminalFromC(cterm, cfg)
+
+	// Register any effects that were provided via options.
+	t.syncEffects()
+
+	return t, nil
+}
+
+// terminalFromC wraps a caller-owned C terminal and installs the Go userdata
+// handle required by all terminal effect callbacks. Snapshot decoding uses
+// this path so restored terminals have the same lifecycle and effect support
+// as terminals created by NewTerminal.
+func terminalFromC(cterm C.GhosttyTerminal, cfg TerminalConfig) *Terminal {
 	t := &Terminal{
 		ptr:                   cterm,
 		onWritePty:            cfg.onWritePty,
@@ -466,11 +503,7 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 		C.GHOSTTY_TERMINAL_OPT_USERDATA,
 		handleToPointer(t.handle),
 	)
-
-	// Register any effects that were provided via options.
-	t.syncEffects()
-
-	return t, nil
+	return t
 }
 
 // Close frees the underlying terminal handle and releases the cgo.Handle.

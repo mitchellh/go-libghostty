@@ -155,6 +155,9 @@ var (
 	// ModeColorSchemeReport enables color scheme reporting.
 	ModeColorSchemeReport = Mode(C.GHOSTTY_MODE_COLOR_SCHEME_REPORT)
 
+	// ModeVisibilityReport enables terminal visibility reporting.
+	ModeVisibilityReport = Mode(C.GHOSTTY_MODE_VISIBILITY_REPORT)
+
 	// ModeInBandResize enables in-band size reports.
 	ModeInBandResize = Mode(C.GHOSTTY_MODE_IN_BAND_RESIZE)
 )

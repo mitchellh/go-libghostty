@@ -290,6 +290,14 @@ type KittyGraphicsImageInfo struct {
 	// Generation is the image's process-wide content generation stamp.
 	Generation uint64
 
+	// DataLen is the decoded pixel payload length in bytes. For a pending
+	// image, this is the expected length reserved against the storage limit.
+	DataLen uint
+
+	// DataPending reports that metadata is resident but the pixel payload has
+	// not completed yet. Data is nil while this is true.
+	DataPending bool
+
 	// Data is a borrowed slice of the raw pixel data. Only valid
 	// until the next mutating terminal call.
 	Data []byte
@@ -548,10 +556,10 @@ func (img *KittyGraphicsImage) Generation() (uint64, error) {
 	return uint64(generation), nil
 }
 
-// Info returns all image metadata in a single call. This is more
-// efficient than calling ID, Number, Width, Height, Format,
-// Compression, and Data individually. Uses the get_multi C API
-// to fetch all fields in one cgo round-trip.
+// Info returns all image metadata with a batched metadata query followed by a
+// payload query. This is more efficient than calling every getter
+// individually. Pending images still return their metadata, expected DataLen,
+// and DataPending=true while Data remains nil.
 func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 	// Output variables — one per field, typed to match the C API.
 	var (
@@ -562,7 +570,6 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 		format      C.GhosttyKittyImageFormat
 		compression C.GhosttyKittyImageCompression
 		generation  C.uint64_t
-		dataPtr     *C.uint8_t
 		dataLen     C.size_t
 	)
 
@@ -575,7 +582,6 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 		C.GHOSTTY_KITTY_IMAGE_DATA_FORMAT,
 		C.GHOSTTY_KITTY_IMAGE_DATA_COMPRESSION,
 		C.GHOSTTY_KITTY_IMAGE_DATA_GENERATION,
-		C.GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR,
 		C.GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN,
 	}
 
@@ -591,7 +597,6 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 		unsafe.Pointer(&format),
 		unsafe.Pointer(&compression),
 		unsafe.Pointer(&generation),
-		unsafe.Pointer(&dataPtr),
 		unsafe.Pointer(&dataLen),
 	}
 	cVals, cValsSize := cValuesArray(values[:])
@@ -615,17 +620,39 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 		Format:      KittyImageFormat(format),
 		Compression: KittyImageCompression(compression),
 		Generation:  uint64(generation),
+		DataLen:     uint(dataLen),
 	}
 
-	if dataPtr != nil && dataLen > 0 {
-		info.Data = unsafe.Slice((*byte)(unsafe.Pointer(dataPtr)), int(dataLen))
+	var dataPtr *C.uint8_t
+	err := resultError(C.ghostty_kitty_graphics_image_get(
+		img.ptr,
+		C.GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR,
+		unsafe.Pointer(&dataPtr),
+	))
+	if err != nil {
+		var resultErr *Error
+		if errors.As(err, &resultErr) && resultErr.Result == ResultNoValue {
+			info.DataPending = true
+			return info, nil
+		}
+		return nil, err
+	}
+
+	length, valid := ghosttySizeToInt(dataLen)
+	if !valid {
+		return nil, &Error{Result: ResultLimitExceeded}
+	}
+	if dataPtr != nil && length > 0 {
+		info.Data = unsafe.Slice((*byte)(unsafe.Pointer(dataPtr)), length)
 	}
 
 	return info, nil
 }
 
-// Data returns a borrowed slice of the raw pixel data. The slice is
-// only valid until the next mutating terminal call.
+// Data returns a borrowed slice of the raw pixel data. The slice is only valid
+// until the next mutating terminal call. A pending image returns an error with
+// [ResultNoValue]; use [KittyGraphicsImage.DataLen] to inspect its expected
+// payload length.
 func (img *KittyGraphicsImage) Data() ([]byte, error) {
 	var ptr *C.uint8_t
 	if err := resultError(C.ghostty_kitty_graphics_image_get(
@@ -645,11 +672,30 @@ func (img *KittyGraphicsImage) Data() ([]byte, error) {
 		return nil, err
 	}
 
-	if ptr == nil || length == 0 {
+	count, valid := ghosttySizeToInt(length)
+	if !valid {
+		return nil, &Error{Result: ResultLimitExceeded}
+	}
+	if ptr == nil || count == 0 {
 		return nil, nil
 	}
 
-	return unsafe.Slice((*byte)(unsafe.Pointer(ptr)), int(length)), nil
+	return unsafe.Slice((*byte)(unsafe.Pointer(ptr)), count), nil
+}
+
+// DataLen returns the decoded pixel payload length in bytes. For a pending
+// image this is the expected length reserved against the storage limit even
+// though [KittyGraphicsImage.Data] returns [ResultNoValue].
+func (img *KittyGraphicsImage) DataLen() (uint, error) {
+	var length C.size_t
+	if err := resultError(C.ghostty_kitty_graphics_image_get(
+		img.ptr,
+		C.GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN,
+		unsafe.Pointer(&length),
+	)); err != nil {
+		return 0, err
+	}
+	return uint(length), nil
 }
 
 // NewKittyGraphicsPlacementIterator creates a new placement iterator.

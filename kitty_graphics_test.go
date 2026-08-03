@@ -408,8 +408,21 @@ func TestKittyGraphicsImageInfo(t *testing.T) {
 	if info.Compression != KittyImageCompressionNone {
 		t.Fatalf("expected no compression, got %d", info.Compression)
 	}
+	if info.DataLen != 4 {
+		t.Fatalf("expected data length 4, got %d", info.DataLen)
+	}
+	if info.DataPending {
+		t.Fatal("expected completed image data")
+	}
 	if len(info.Data) != 4 {
 		t.Fatalf("expected 4 bytes of pixel data, got %d", len(info.Data))
+	}
+	dataLen, err := img.DataLen()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dataLen != info.DataLen {
+		t.Fatalf("DataLen returned %d, Info returned %d", dataLen, info.DataLen)
 	}
 }
 
