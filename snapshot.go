@@ -161,7 +161,7 @@ const (
 	SnapshotDecoderDataProgressRemaining SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_REMAINING
 )
 
-// SnapshotDecoder incrementally decodes and authenticates one terminal
+// SnapshotDecoder incrementally decodes and validates one terminal
 // snapshot. It is stateful, not safe for concurrent use, and must be closed.
 //
 // A terminal returned by [SnapshotDecoder.Ready] must remain alive until the
@@ -371,7 +371,7 @@ func (d *SnapshotDecoder) SetMaxContinuationBytes(limit uint) error {
 	))
 }
 
-// Ready decodes and authenticates the renderable snapshot prefix. The
+// Ready decodes and validates the renderable snapshot prefix. The
 // returned terminal is caller-owned and immediately usable; older history can
 // then be restored one page at a time with [SnapshotDecoder.Next].
 // C: ghostty_snapshot_decoder_ready
@@ -383,7 +383,7 @@ func (d *SnapshotDecoder) Ready() (*Terminal, error) {
 	return terminalFromC(result.terminal, TerminalConfig{}), nil
 }
 
-// Next decodes and authenticates one history page. It returns true after a
+// Next decodes and validates one history page. It returns true after a
 // page is consumed. It returns false with no error after FINISH is validated,
 // including on repeated calls after FINISH.
 // C: ghostty_snapshot_decoder_next
@@ -400,7 +400,7 @@ func (d *SnapshotDecoder) Next() (bool, error) {
 	}
 }
 
-// Decode decodes and authenticates one complete snapshot in a single call.
+// Decode decodes and validates one complete snapshot in a single call.
 // The returned terminal is caller-owned. Bytes following the FINISH record
 // remain outside the snapshot and can be located with SourceOffset.
 // C: ghostty_snapshot_decoder_decode

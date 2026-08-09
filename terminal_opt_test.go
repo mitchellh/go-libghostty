@@ -577,3 +577,171 @@ func TestTerminalCompression(t *testing.T) {
 		t.Fatalf("unexpected compression result %d", result)
 	}
 }
+
+func TestTerminalModeDefault(t *testing.T) {
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithModeDefault(ModeGraphemeCluster, true),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	value, err := term.Mode(ModeGraphemeCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !value {
+		t.Fatal("expected configured mode default to update the current value")
+	}
+
+	if err := term.SetMode(ModeGraphemeCluster, false); err != nil {
+		t.Fatal(err)
+	}
+	term.Reset()
+	value, err = term.Mode(ModeGraphemeCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !value {
+		t.Fatal("expected reset to restore the configured mode default")
+	}
+
+	if err := term.SetModeDefault(ModeGraphemeCluster, false); err != nil {
+		t.Fatal(err)
+	}
+	value, err = term.Mode(ModeGraphemeCluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value {
+		t.Fatal("expected SetModeDefault to update the current value")
+	}
+
+	if err := term.SetModeDefault(ModeAltScreen, true); err == nil {
+		t.Fatal("expected a transition mode to reject default configuration")
+	}
+}
+
+func TestTerminalTitleReport(t *testing.T) {
+	var received []byte
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithTitleReport(true),
+		WithWritePty(func(_ *Terminal, data []byte) {
+			received = append(received, data...)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	term.VTWrite([]byte("\x1b]2;safe title\x1b\\"))
+	term.VTWrite([]byte("\x1b[21t"))
+	if want := []byte("\x1b]lsafe title\x1b\\"); !bytes.Equal(received, want) {
+		t.Fatalf("expected title report %q, got %q", want, received)
+	}
+
+	received = nil
+	if err := term.SetTitleReport(false); err != nil {
+		t.Fatal(err)
+	}
+	term.VTWrite([]byte("\x1b[21t"))
+	if received != nil {
+		t.Fatalf("expected disabled title report to be ignored, got %q", received)
+	}
+}
+
+func TestTerminalTerminfoName(t *testing.T) {
+	var received []byte
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithTerminfoName("xterm"),
+		WithWritePty(func(_ *Terminal, data []byte) {
+			received = append(received, data...)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	const query = "\x1bP+q544E\x1b\\"
+	term.VTWrite([]byte(query))
+	if want := []byte("\x1bP1+r544E=787465726D\x1b\\"); !bytes.Equal(received, want) {
+		t.Fatalf("expected terminfo response %q, got %q", want, received)
+	}
+
+	received = nil
+	if err := term.SetTerminfoName(""); err != nil {
+		t.Fatal(err)
+	}
+	term.VTWrite([]byte(query))
+	if received != nil {
+		t.Fatalf("expected cleared terminfo name to leave TN unanswered, got %q", received)
+	}
+
+	if err := term.SetTerminfoName(string(make([]byte, 129))); err == nil {
+		t.Fatal("expected a terminfo name longer than 128 bytes to be rejected")
+	}
+}
+
+func TestTerminalUnknownSequenceEffect(t *testing.T) {
+	var sequences []TerminalUnknownSequence
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithUnknownMaxBytes(8),
+		WithUnknownSequence(func(_ *Terminal, sequence TerminalUnknownSequence) {
+			sequences = append(sequences, sequence)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// Capture persists across writes and excludes the APC delimiters.
+	term.VTWrite([]byte("\x1b_abc;"))
+	if len(sequences) != 0 {
+		t.Fatalf("expected split APC to remain buffered, got %d callbacks", len(sequences))
+	}
+	term.VTWrite([]byte("xy\x1b\\"))
+	if len(sequences) != 1 {
+		t.Fatalf("expected one unknown-sequence callback, got %d", len(sequences))
+	}
+	if got := sequences[0]; got.Tag != TerminalUnknownSequenceAPC ||
+		got.APC.Truncated || !bytes.Equal(got.APC.Content, []byte("abc;xy")) {
+		t.Fatalf("unexpected APC callback: %+v", got)
+	}
+
+	term.VTWrite([]byte("\x1b_abcdefghijkl\x1b\\"))
+	if len(sequences) != 2 {
+		t.Fatalf("expected two unknown-sequence callbacks, got %d", len(sequences))
+	}
+	if got := sequences[1]; !got.APC.Truncated ||
+		!bytes.Equal(got.APC.Content, []byte("abcdefgh")) {
+		t.Fatalf("unexpected truncated APC callback: %+v", got)
+	}
+	if !bytes.Equal(sequences[0].APC.Content, []byte("abc;xy")) {
+		t.Fatalf("expected callback content to remain Go-owned, got %q", sequences[0].APC.Content)
+	}
+
+	term.SetEffectUnknownSequence(nil)
+	term.VTWrite([]byte("\x1b_ignored\x1b\\"))
+	if len(sequences) != 2 {
+		t.Fatalf("expected cleared callback to remain inactive, got %d callbacks", len(sequences))
+	}
+
+	term.SetEffectUnknownSequence(func(_ *Terminal, sequence TerminalUnknownSequence) {
+		sequences = append(sequences, sequence)
+	})
+	if err := term.SetUnknownMaxBytes(0); err != nil {
+		t.Fatal(err)
+	}
+	term.VTWrite([]byte("\x1b_disabled\x1b\\"))
+	if len(sequences) != 2 {
+		t.Fatalf("expected zero limit to disable capture, got %d callbacks", len(sequences))
+	}
+}

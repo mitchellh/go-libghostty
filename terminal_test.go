@@ -108,14 +108,14 @@ func TestTerminalIOWriter(t *testing.T) {
 	}
 }
 
-func TestTerminalModeGetSet(t *testing.T) {
+func TestTerminalMode(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer term.Close()
 
-	// Test several modes: set via ModeSet, read back via ModeGet.
+	// Test several modes: set via SetMode, read back via Mode.
 	tests := []struct {
 		name       string
 		mode       Mode
@@ -133,7 +133,7 @@ func TestTerminalModeGetSet(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Verify default value.
-			val, err := term.ModeGet(tt.mode)
+			val, err := term.Mode(tt.mode)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -142,10 +142,10 @@ func TestTerminalModeGetSet(t *testing.T) {
 			}
 
 			// Toggle the mode.
-			if err := term.ModeSet(tt.mode, !tt.defaultVal); err != nil {
+			if err := term.SetMode(tt.mode, !tt.defaultVal); err != nil {
 				t.Fatal(err)
 			}
-			val, err = term.ModeGet(tt.mode)
+			val, err = term.Mode(tt.mode)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -154,10 +154,10 @@ func TestTerminalModeGetSet(t *testing.T) {
 			}
 
 			// Toggle back.
-			if err := term.ModeSet(tt.mode, tt.defaultVal); err != nil {
+			if err := term.SetMode(tt.mode, tt.defaultVal); err != nil {
 				t.Fatal(err)
 			}
-			val, err = term.ModeGet(tt.mode)
+			val, err = term.Mode(tt.mode)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -176,7 +176,7 @@ func TestTerminalModeVTWrite(t *testing.T) {
 	defer term.Close()
 
 	// Test that VT escape sequences correctly set and reset modes
-	// and that ModeGet reads them back.
+	// and that Mode reads them back.
 	// DEC private modes use CSI ? <n> h (set) / CSI ? <n> l (reset).
 	// ANSI modes use CSI <n> h (set) / CSI <n> l (reset).
 	tests := []struct {
@@ -198,7 +198,7 @@ func TestTerminalModeVTWrite(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Verify default.
-			val, err := term.ModeGet(tt.mode)
+			val, err := term.Mode(tt.mode)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -208,7 +208,7 @@ func TestTerminalModeVTWrite(t *testing.T) {
 
 			// Set via VT escape sequence.
 			term.VTWrite([]byte(tt.setSeq))
-			val, err = term.ModeGet(tt.mode)
+			val, err = term.Mode(tt.mode)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -218,7 +218,7 @@ func TestTerminalModeVTWrite(t *testing.T) {
 
 			// Reset via VT escape sequence.
 			term.VTWrite([]byte(tt.resetSeq))
-			val, err = term.ModeGet(tt.mode)
+			val, err = term.Mode(tt.mode)
 			if err != nil {
 				t.Fatal(err)
 			}

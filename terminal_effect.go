@@ -24,6 +24,7 @@ extern GhosttyString goXtversionTrampoline(GhosttyTerminal, void*);
 extern bool goSizeTrampoline(GhosttyTerminal, void*, GhosttySizeReportSize*);
 extern bool goColorSchemeTrampoline(GhosttyTerminal, void*, GhosttyColorScheme*);
 extern bool goDeviceAttributesTrampoline(GhosttyTerminal, void*, GhosttyDeviceAttributes*);
+extern void goUnknownSequenceTrampoline(GhosttyTerminal, void*, GhosttyTerminalUnknownSequence*);
 
 // Helpers to set each effect via ghostty_terminal_set.
 // We need these because cgo cannot take the address of a Go-exported
@@ -63,6 +64,16 @@ static inline GhosttyResult set_color_scheme(GhosttyTerminal t) {
 }
 static inline GhosttyResult set_device_attributes(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES, (const void*)goDeviceAttributesTrampoline);
+}
+static inline GhosttyResult set_unknown_sequence(GhosttyTerminal t) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE, (const void*)goUnknownSequenceTrampoline);
+}
+
+// Return the APC member of the tagged union without making Go depend on
+// cgo's platform-specific representation of C unions.
+static inline const GhosttyTerminalUnknownStringSequence* unknown_sequence_apc(
+		const GhosttyTerminalUnknownSequence* sequence) {
+	return &sequence->value.apc;
 }
 
 // Helper to clear an effect by setting it to NULL.
@@ -139,6 +150,11 @@ func (t *Terminal) syncEffects() {
 		C.set_device_attributes(t.ptr)
 	} else {
 		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES)
+	}
+	if t.onUnknownSequence != nil {
+		C.set_unknown_sequence(t.ptr)
+	} else {
+		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE)
 	}
 }
 
@@ -310,6 +326,35 @@ func goProgressReportTrampoline(
 		State:    TerminalProgressState(report.state),
 		Progress: int8(report.progress),
 	})
+}
+
+//export goUnknownSequenceTrampoline
+func goUnknownSequenceTrampoline(
+	_ C.GhosttyTerminal,
+	userdata unsafe.Pointer,
+	sequence *C.GhosttyTerminalUnknownSequence,
+) {
+	t := terminalFromUserdata(userdata)
+	if t.onUnknownSequence == nil || sequence == nil {
+		return
+	}
+
+	value := TerminalUnknownSequence{
+		Tag: TerminalUnknownSequenceTag(sequence.tag),
+	}
+	if value.Tag == TerminalUnknownSequenceAPC {
+		apc := C.unknown_sequence_apc(sequence)
+		content, ok := copyGhosttyString(apc.content)
+		if !ok {
+			return
+		}
+		value.APC = TerminalUnknownStringSequence{
+			Truncated: bool(apc.truncated),
+			Content:   content,
+		}
+	}
+
+	t.onUnknownSequence(t, value)
 }
 
 //export goEnquiryTrampoline

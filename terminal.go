@@ -40,6 +40,7 @@ type Terminal struct {
 	onSize                SizeFn
 	onColorScheme         ColorSchemeFn
 	onDeviceAttributes    DeviceAttributesFn
+	onUnknownSequence     UnknownSequenceFn
 
 	// effectBuf holds C-allocated memory for the most recent response
 	// returned by an effect trampoline (e.g. enquiry, xtversion).
@@ -75,6 +76,22 @@ type TerminalConfig struct {
 	// disabled; zero also explicitly disables tracking.
 	ContinuationMaxBytes *uint
 
+	// TitleReport optionally enables replies to CSI 21 t title queries. Nil
+	// retains the secure disabled default.
+	TitleReport *bool
+
+	// ModeDefaults configure terminal mode reset defaults. Each entry also
+	// immediately replaces the current value of that mode.
+	ModeDefaults []TerminalModeConfig
+
+	// UnknownMaxBytes is the optional maximum number of bytes retained for an
+	// unsupported terminal sequence. Nil leaves capture disabled.
+	UnknownMaxBytes *uint
+
+	// TerminfoName is the optional terminfo entry name reported for XTGETTCAP
+	// TN queries. Nil leaves the query unanswered; an empty string clears it.
+	TerminfoName *string
+
 	// Effect handlers applied after terminal creation.
 	onWritePty            WritePtyFn
 	onBell                BellFn
@@ -88,6 +105,7 @@ type TerminalConfig struct {
 	onSize                SizeFn
 	onColorScheme         ColorSchemeFn
 	onDeviceAttributes    DeviceAttributesFn
+	onUnknownSequence     UnknownSequenceFn
 }
 
 // WritePtyFn is called when the terminal writes data back to the pty
@@ -244,6 +262,51 @@ type TerminalProgressReport struct {
 // C: GhosttyTerminalProgressReportFn
 type ProgressReportFn func(t *Terminal, report TerminalProgressReport)
 
+// TerminalUnknownSequenceTag identifies the kind of unsupported terminal
+// sequence reported by [UnknownSequenceFn]. Additional tags may be added by
+// future libghostty versions.
+// C: GhosttyTerminalUnknownSequenceTag
+type TerminalUnknownSequenceTag int
+
+const (
+	// TerminalUnknownSequenceAPC identifies an unsupported Application Program
+	// Command sequence.
+	TerminalUnknownSequenceAPC TerminalUnknownSequenceTag = C.GHOSTTY_TERMINAL_UNKNOWN_SEQUENCE_APC
+)
+
+// TerminalUnknownStringSequence contains one unsupported string sequence.
+// Content is copied into Go-owned memory before the callback runs and may be
+// retained after the callback returns.
+// C: GhosttyTerminalUnknownStringSequence
+type TerminalUnknownStringSequence struct {
+	// Truncated reports whether Content was shortened by the configured byte
+	// limit or by an allocation failure inside libghostty.
+	Truncated bool
+
+	// Content contains the bytes between the sequence introducer and
+	// terminator. It is binary-safe and does not include either delimiter.
+	Content []byte
+}
+
+// TerminalUnknownSequence is an unsupported terminal sequence. APC is
+// populated when Tag is [TerminalUnknownSequenceAPC]. For tags introduced by
+// newer libghostty versions, fields unknown to this binding remain zero.
+// C: GhosttyTerminalUnknownSequence
+type TerminalUnknownSequence struct {
+	// Tag identifies which sequence value is populated.
+	Tag TerminalUnknownSequenceTag
+
+	// APC contains the unsupported APC value when Tag is
+	// TerminalUnknownSequenceAPC.
+	APC TerminalUnknownStringSequence
+}
+
+// UnknownSequenceFn is called synchronously for normally terminated terminal
+// sequences whose identifier libghostty does not support. Capture must also be
+// enabled with [WithUnknownMaxBytes] or [Terminal.SetUnknownMaxBytes].
+// C: GhosttyTerminalUnknownSequenceFn
+type UnknownSequenceFn func(t *Terminal, sequence TerminalUnknownSequence)
+
 // EnquiryFn is called when the terminal receives ENQ (0x05).
 // The first parameter is the terminal that triggered the effect.
 // Return the response bytes; nil or empty means no response.
@@ -274,6 +337,18 @@ type ColorSchemeFn func(t *Terminal) (ColorScheme, bool)
 // or zero value and false to ignore the query.
 // C: GhosttyTerminalDeviceAttributesFn
 type DeviceAttributesFn func(t *Terminal) (DeviceAttributes, bool)
+
+// TerminalModeConfig pairs a terminal mode with a boolean value. It is used
+// by the generic terminal option and data APIs for mode configuration and
+// queries.
+// C: GhosttyTerminalModeConfig
+type TerminalModeConfig struct {
+	// Mode identifies the terminal mode to configure or query.
+	Mode Mode
+
+	// Value is the value to set or the current value returned by a query.
+	Value bool
+}
 
 // WithSize sets the terminal dimensions in cells.
 // Both cols and rows must be greater than zero.
@@ -306,6 +381,44 @@ func WithMaxScrollbackLines(lines uint) TerminalOption {
 func WithContinuationMaxBytes(limit uint) TerminalOption {
 	return func(c *TerminalConfig) {
 		c.ContinuationMaxBytes = &limit
+	}
+}
+
+// WithTitleReport enables or disables replies to CSI 21 t window-title
+// queries. Reporting is disabled by default because a program can otherwise
+// query a title it previously set and inject that text into the pty stream.
+func WithTitleReport(enabled bool) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.TitleReport = &enabled
+	}
+}
+
+// WithModeDefault sets the reset default for mode. Setting a default also
+// immediately updates the mode's current value. Modes that represent
+// transitions or mirror other terminal state are rejected by NewTerminal.
+func WithModeDefault(mode Mode, value bool) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.ModeDefaults = append(c.ModeDefaults, TerminalModeConfig{
+			Mode:  mode,
+			Value: value,
+		})
+	}
+}
+
+// WithUnknownMaxBytes sets the maximum content bytes retained for each
+// unsupported terminal sequence. A zero limit disables capture.
+func WithUnknownMaxBytes(limit uint) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.UnknownMaxBytes = &limit
+	}
+}
+
+// WithTerminfoName sets the terminfo entry name reported in response to an
+// XTGETTCAP query for TN. The name may contain at most 128 bytes. An empty name
+// leaves the query unanswered.
+func WithTerminfoName(name string) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.TerminfoName = &name
 	}
 }
 
@@ -363,6 +476,14 @@ func WithPwdChanged(fn PwdChangedFn) TerminalOption {
 func WithProgressReport(fn ProgressReportFn) TerminalOption {
 	return func(c *TerminalConfig) {
 		c.onProgressReport = fn
+	}
+}
+
+// WithUnknownSequence registers a handler for unsupported terminal sequence
+// identifiers. Capture must also be enabled with [WithUnknownMaxBytes].
+func WithUnknownSequence(fn UnknownSequenceFn) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.onUnknownSequence = fn
 	}
 }
 
@@ -469,6 +590,35 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 
 	t := terminalFromC(cterm, cfg)
 
+	// Apply the remaining constructor options through the same typed setters
+	// exposed for live terminals. The terminal is already wrapped so failures
+	// can use the normal Close path to release both the C terminal and userdata
+	// handle.
+	if cfg.TitleReport != nil {
+		if err := t.SetTitleReport(*cfg.TitleReport); err != nil {
+			t.Close()
+			return nil, err
+		}
+	}
+	for _, mode := range cfg.ModeDefaults {
+		if err := t.SetModeDefault(mode.Mode, mode.Value); err != nil {
+			t.Close()
+			return nil, err
+		}
+	}
+	if cfg.UnknownMaxBytes != nil {
+		if err := t.SetUnknownMaxBytes(*cfg.UnknownMaxBytes); err != nil {
+			t.Close()
+			return nil, err
+		}
+	}
+	if cfg.TerminfoName != nil {
+		if err := t.SetTerminfoName(*cfg.TerminfoName); err != nil {
+			t.Close()
+			return nil, err
+		}
+	}
+
 	// Register any effects that were provided via options.
 	t.syncEffects()
 
@@ -494,6 +644,7 @@ func terminalFromC(cterm C.GhosttyTerminal, cfg TerminalConfig) *Terminal {
 		onSize:                cfg.onSize,
 		onColorScheme:         cfg.onColorScheme,
 		onDeviceAttributes:    cfg.onDeviceAttributes,
+		onUnknownSequence:     cfg.onUnknownSequence,
 	}
 
 	// Always set userdata to our handle so trampolines can find us.
@@ -633,20 +784,6 @@ func (t *Terminal) VTWrite(data []byte) {
 func (t *Terminal) Write(p []byte) (int, error) {
 	t.VTWrite(p)
 	return len(p), nil
-}
-
-// ModeGet returns the current value of a terminal mode.
-func (t *Terminal) ModeGet(mode Mode) (bool, error) {
-	var val C.bool
-	if err := resultError(C.ghostty_terminal_mode_get(t.ptr, C.GhosttyMode(mode), &val)); err != nil {
-		return false, err
-	}
-	return bool(val), nil
-}
-
-// ModeSet sets a terminal mode to the given value.
-func (t *Terminal) ModeSet(mode Mode, value bool) error {
-	return resultError(C.ghostty_terminal_mode_set(t.ptr, C.GhosttyMode(mode), C.bool(value)))
 }
 
 // ScrollViewportTag describes the scroll behavior.

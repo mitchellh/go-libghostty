@@ -94,6 +94,14 @@ func (t *Terminal) SetEffectDeviceAttributes(fn DeviceAttributesFn) {
 	t.syncEffects()
 }
 
+// SetEffectUnknownSequence registers (or clears) the unknown-sequence effect
+// on a live terminal. Pass nil to clear. Capture must also be enabled with
+// [Terminal.SetUnknownMaxBytes].
+func (t *Terminal) SetEffectUnknownSequence(fn UnknownSequenceFn) {
+	t.onUnknownSequence = fn
+	t.syncEffects()
+}
+
 // SetColorBackground sets the default background color. Pass nil to
 // clear (unset).
 func (t *Terminal) SetColorBackground(c *ColorRGB) error {
@@ -318,6 +326,36 @@ func (t *Terminal) SetKittyImageMediumSharedMem(enabled bool) error {
 	))
 }
 
+// SetMode sets the current value of a terminal mode without changing the
+// value restored by a full terminal reset.
+func (t *Terminal) SetMode(mode Mode, value bool) error {
+	config := C.GhosttyTerminalModeConfig{
+		mode:  C.GhosttyMode(mode),
+		value: C.bool(value),
+	}
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_MODE,
+		unsafe.Pointer(&config),
+	))
+}
+
+// SetModeDefault sets the reset default for a terminal mode. This
+// unconditionally updates both the current value and the value restored by a
+// full terminal reset. Modes that represent transitions or mirror other
+// terminal state return ResultInvalidValue.
+func (t *Terminal) SetModeDefault(mode Mode, value bool) error {
+	config := C.GhosttyTerminalModeConfig{
+		mode:  C.GhosttyMode(mode),
+		value: C.bool(value),
+	}
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_MODE_DEFAULT,
+		unsafe.Pointer(&config),
+	))
+}
+
 // SetScrollbackMaxBytes sets the approximate maximum scrollback allocation
 // in bytes. Passing nil removes the byte limit. Lowering the limit may
 // immediately remove eligible historical pages.
@@ -350,9 +388,40 @@ func (t *Terminal) SetScrollbackMaxLines(limit *uint) error {
 	))
 }
 
+// SetTerminfoName sets the terminfo entry name reported in response to an
+// XTGETTCAP query for TN. The name may contain at most 128 bytes. An empty name
+// clears the configured value and leaves TN queries unanswered.
+func (t *Terminal) SetTerminfoName(name string) error {
+	return t.setStringOption(C.GHOSTTY_TERMINAL_OPT_TERMINFO_NAME, &name)
+}
+
 // SetTitle sets the terminal title manually. An empty string clears it.
 func (t *Terminal) SetTitle(title string) error {
 	return t.setStringOption(C.GHOSTTY_TERMINAL_OPT_TITLE, &title)
+}
+
+// SetTitleReport enables or disables replies to CSI 21 t window-title
+// queries. Reporting is disabled by default because a program can otherwise
+// query a title it previously set and inject that text into the pty stream.
+func (t *Terminal) SetTitleReport(enabled bool) error {
+	v := C.bool(enabled)
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_TITLE_REPORT,
+		unsafe.Pointer(&v),
+	))
+}
+
+// SetUnknownMaxBytes sets the maximum content bytes retained for each
+// unsupported terminal sequence. A zero limit disables capture and prevents
+// unknown-sequence callbacks.
+func (t *Terminal) SetUnknownMaxBytes(limit uint) error {
+	v := C.size_t(limit)
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_UNKNOWN_MAX_BYTES,
+		unsafe.Pointer(&v),
+	))
 }
 
 // setStringOption stages a Go string through C-owned memory before passing a

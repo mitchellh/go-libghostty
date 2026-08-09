@@ -11,7 +11,7 @@ import (
 )
 
 // chunkReader deliberately returns short successful reads to verify that the
-// GhosttyReader bridge and snapshot decoder continue until a checkpoint is
+// GhosttyReader bridge and snapshot decoder continue until a marker is
 // complete.
 type chunkReader struct {
 	reader *bytes.Reader

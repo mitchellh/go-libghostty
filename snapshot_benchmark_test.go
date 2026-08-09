@@ -168,7 +168,7 @@ func benchmarkSnapshotDecode(
 }
 
 // snapshotBenchmarkReadyPrefixLen reports only the bytes consumed through the
-// READY checkpoint. Using the complete snapshot size for SetBytes would make
+// READY marker. Using the complete snapshot size for SetBytes would make
 // the READY throughput metric misleading for large-history cases.
 func snapshotBenchmarkReadyPrefixLen(b *testing.B, snapshot []byte) int {
 	b.Helper()

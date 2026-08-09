@@ -159,6 +159,11 @@ const (
 	// TerminalDataContinuationMaxBytes is the configured maximum retained VT
 	// continuation size in bytes (size_t). Zero means tracking is disabled.
 	TerminalDataContinuationMaxBytes TerminalData = C.GHOSTTY_TERMINAL_DATA_CONTINUATION_MAX_BYTES
+
+	// TerminalDataMode gets the current value of a terminal mode. The caller
+	// initializes the mode field of a GhosttyTerminalModeConfig and the query
+	// writes its value field (GhosttyTerminalModeConfig).
+	TerminalDataMode TerminalData = C.GHOSTTY_TERMINAL_DATA_MODE
 )
 
 // ActiveScreen returns which screen buffer is currently active.
@@ -400,6 +405,19 @@ func (t *Terminal) KittyImageStorageLimit() (uint64, error) {
 		return 0, err
 	}
 	return uint64(v), nil
+}
+
+// Mode returns the current value of a terminal mode.
+func (t *Terminal) Mode(mode Mode) (bool, error) {
+	config := C.GhosttyTerminalModeConfig{mode: C.GhosttyMode(mode)}
+	if err := resultError(C.ghostty_terminal_get(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_MODE,
+		unsafe.Pointer(&config),
+	)); err != nil {
+		return false, err
+	}
+	return bool(config.value), nil
 }
 
 // MouseTracking reports whether any mouse tracking mode is active.
