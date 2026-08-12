@@ -297,6 +297,40 @@ func TestTerminalVTProcessingError(t *testing.T) {
 	}
 }
 
+func TestTerminalVTGround(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	ground, err := term.VTGround()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ground {
+		t.Fatal("expected a fresh terminal to be at VT ground")
+	}
+
+	term.VTWrite([]byte("\x1b[31"))
+	ground, err = term.VTGround()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ground {
+		t.Fatal("expected an unfinished CSI sequence to be above VT ground")
+	}
+
+	term.VTWrite([]byte("m"))
+	ground, err = term.VTGround()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ground {
+		t.Fatal("expected a completed CSI sequence to return to VT ground")
+	}
+}
+
 func TestTerminalColorRoundTrip(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {

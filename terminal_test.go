@@ -90,6 +90,76 @@ func TestTerminalVTWrite(t *testing.T) {
 	term.VTWrite(nil)               // empty write
 }
 
+func TestTerminalVTWriteUntilGround(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// A terminal already at ground leaves the input untouched.
+	consumed, err := term.VTWriteUntilGround([]byte("untouched"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consumed != 0 {
+		t.Fatalf("expected no bytes consumed at ground, got %d", consumed)
+	}
+
+	// Complete a split CSI sequence, but stop before processing the printable
+	// suffix because the parser reaches ground after the final byte.
+	term.VTWrite([]byte("\x1b[31"))
+	input := []byte("mABC")
+	consumed, err = term.VTWriteUntilGround(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consumed != 1 {
+		t.Fatalf("expected one byte consumed through ground, got %d", consumed)
+	}
+	x, err := term.CursorX()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x != 0 {
+		t.Fatalf("expected suffix to remain unprocessed, cursor is at %d", x)
+	}
+
+	term.VTWrite(input[consumed:])
+	x, err = term.CursorX()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x != 3 {
+		t.Fatalf("expected suffix write to advance cursor to 3, got %d", x)
+	}
+
+	// An empty slice while unfinished consumes nothing but cannot find a
+	// ground boundary.
+	term.VTWrite([]byte("\x1b["))
+	consumed, err = term.VTWriteUntilGround(nil)
+	if consumed != 0 {
+		t.Fatalf("expected empty input to consume zero bytes, got %d", consumed)
+	}
+	assertResultError(t, err, ResultNoValue)
+}
+
+func TestTerminalVTWriteUntilGroundNoValue(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	term.VTWrite([]byte("\x1b["))
+	input := []byte("123")
+	consumed, err := term.VTWriteUntilGround(input)
+	if consumed != len(input) {
+		t.Fatalf("expected all %d bytes consumed, got %d", len(input), consumed)
+	}
+	assertResultError(t, err, ResultNoValue)
+}
+
 func TestTerminalIOWriter(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {

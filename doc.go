@@ -51,9 +51,9 @@
 // [WithProgressReport], or on a live terminal with
 // [Terminal.SetEffectWritePty] and friends.
 //
-// Effect callbacks run synchronously during [Terminal.VTWrite]. They
-// must not call [Terminal.VTWrite] on the same terminal and should avoid
-// blocking for long periods.
+// Effect callbacks run synchronously during [Terminal.VTWrite] and
+// [Terminal.VTWriteUntilGround]. They must not call either VT write method
+// on the same terminal and should avoid blocking for long periods.
 //
 // [WithWritePty] is the most common effect — it delivers data that
 // the terminal wants to send back to the pty (e.g. query responses):

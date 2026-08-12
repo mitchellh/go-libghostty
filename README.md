@@ -127,7 +127,8 @@ required and used for development of this module. For actual downstream
 usage, you can get `libghostty-vt` available however you like (e.g. system
 package, local checkout, etc.).
 
-You need [Zig](https://ghostty.org/docs/install/build) and CMake on your PATH.
+You need [Zig 0.16.0](https://ghostty.org/docs/install/build) or newer and
+CMake on your PATH. The Nix development shell provides the required versions.
 
 ```shell
 make build

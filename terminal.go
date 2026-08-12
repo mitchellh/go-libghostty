@@ -13,11 +13,12 @@ import (
 // Terminal wraps a Ghostty VT terminal handle.
 // It is stateful, not safe for concurrent use, and not reentrant.
 // Serialize all calls that touch a terminal, including getters,
-// setters, [Terminal.VTWrite], [Terminal.Resize], [Terminal.Close],
+// setters, [Terminal.VTWrite], [Terminal.VTWriteUntilGround],
+// [Terminal.Resize], [Terminal.Close],
 // and any borrowed handles derived from it. Effect callbacks run
-// synchronously during [Terminal.VTWrite]; they must not call
-// [Terminal.VTWrite] on the same terminal and should avoid blocking
-// for long periods.
+// synchronously during VT writes; they must not call [Terminal.VTWrite]
+// or [Terminal.VTWriteUntilGround] on the same terminal and should avoid
+// blocking for long periods.
 // C: GhosttyTerminal
 type Terminal struct {
 	ptr C.GhosttyTerminal
@@ -770,13 +771,40 @@ func (t *Terminal) Compress(mode TerminalCompressionMode) (TerminalCompressionRe
 // VTWrite feeds raw VT-encoded bytes through the terminal's parser,
 // updating terminal state. Malformed input is handled gracefully and
 // will not cause an error. Effect callbacks run synchronously before
-// this call returns; they must not call [Terminal.VTWrite] on the same
-// terminal.
+// this call returns; they must not call [Terminal.VTWrite] or
+// [Terminal.VTWriteUntilGround] on the same terminal.
 func (t *Terminal) VTWrite(data []byte) {
 	if len(data) == 0 {
 		return
 	}
 	C.ghostty_terminal_vt_write(t.ptr, (*C.uint8_t)(&data[0]), C.size_t(len(data)))
+}
+
+// VTWriteUntilGround feeds only the shortest prefix of data needed for the
+// terminal's VT parser to return to its ground state. Ground is the stateless
+// point between UTF-8 codepoints and VT sequences where callers can safely
+// insert out-of-band VT data.
+//
+// If the parser is already at ground, the method consumes zero bytes and
+// leaves data untouched. If all of data is consumed without reaching ground,
+// consumed is len(data) and the returned error has [ResultNoValue]. Effect
+// callbacks run synchronously for the consumed prefix only and must not call
+// either VT write method on the same terminal.
+// C: ghostty_terminal_vt_write_until_ground
+func (t *Terminal) VTWriteUntilGround(data []byte) (consumed int, err error) {
+	var ptr *C.uint8_t
+	if len(data) > 0 {
+		ptr = (*C.uint8_t)(unsafe.Pointer(&data[0]))
+	}
+
+	var out C.size_t
+	result := C.ghostty_terminal_vt_write_until_ground(
+		t.ptr,
+		ptr,
+		C.size_t(len(data)),
+		&out,
+	)
+	return int(out), resultError(result)
 }
 
 // Write implements io.Writer by feeding data through the terminal's

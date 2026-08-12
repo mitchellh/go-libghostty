@@ -164,6 +164,10 @@ const (
 	// initializes the mode field of a GhosttyTerminalModeConfig and the query
 	// writes its value field (GhosttyTerminalModeConfig).
 	TerminalDataMode TerminalData = C.GHOSTTY_TERMINAL_DATA_MODE
+
+	// TerminalDataVTGround indicates whether VT processing is between UTF-8
+	// codepoints and terminal sequences (bool).
+	TerminalDataVTGround TerminalData = C.GHOSTTY_TERMINAL_DATA_VT_GROUND
 )
 
 // ActiveScreen returns which screen buffer is currently active.
@@ -534,6 +538,21 @@ func (t *Terminal) TotalRows() (uint, error) {
 		return 0, err
 	}
 	return uint(v), nil
+}
+
+// VTGround reports whether VT processing is at the stateless point between
+// UTF-8 codepoints and terminal sequences. Out-of-band VT data can be safely
+// inserted while this returns true.
+func (t *Terminal) VTGround() (bool, error) {
+	var v C.bool
+	if err := resultError(C.ghostty_terminal_get(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_VT_GROUND,
+		unsafe.Pointer(&v),
+	)); err != nil {
+		return false, err
+	}
+	return bool(v), nil
 }
 
 // VTProcessingError reports whether VT processing has ever encountered a
