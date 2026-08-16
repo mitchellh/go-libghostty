@@ -5,8 +5,11 @@ package libghostty
 */
 import "C"
 
-// TypeJSON returns a process-lifetime JSON description of every C API struct
-// layout for the current target.
+// TypeJSON returns the process-lifetime, versioned libghostty-vt C type
+// manifest for the current target. The manifest describes all public types,
+// including layouts, enum values, union fields, and packed bit layouts.
+// Consumers should reject unknown schema versions and use this metadata rather
+// than hardcoding ABI details such as [Cell] bit positions.
 func TypeJSON() string {
 	return C.GoString(C.ghostty_type_json())
 }

@@ -7,6 +7,12 @@ package libghostty
 /*
 #include <ghostty/vt.h>
 
+// Helper to create a properly initialized GhosttyRenderStateCursor (sized struct).
+static inline GhosttyRenderStateCursor init_render_state_cursor() {
+	GhosttyRenderStateCursor c = GHOSTTY_INIT_SIZED(GhosttyRenderStateCursor);
+	return c;
+}
+
 // Helper to create a properly initialized GhosttyRenderStateColors (sized struct).
 static inline GhosttyRenderStateColors init_render_state_colors() {
 	GhosttyRenderStateColors c = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);
@@ -93,6 +99,14 @@ const (
 	// RenderStateDataCursorViewportWideTail indicates whether the cursor
 	// is on the tail of a wide character (bool).
 	RenderStateDataCursorViewportWideTail RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_CURSOR_VIEWPORT_WIDE_TAIL
+
+	// RenderStateDataCursor is all cursor state in one sized struct
+	// (GhosttyRenderStateCursor).
+	RenderStateDataCursor RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_CURSOR
+
+	// RenderStateDataColors is all render-state colors in one sized struct
+	// (GhosttyRenderStateColors).
+	RenderStateDataColors RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_COLORS
 )
 
 // Cols returns the viewport width in cells.
@@ -164,7 +178,11 @@ func (rs *RenderState) ColorPalette() (*Palette, error) {
 // single call using the sized-struct API.
 func (rs *RenderState) Colors() (*RenderStateColors, error) {
 	cc := C.init_render_state_colors()
-	if err := resultError(C.ghostty_render_state_colors_get(rs.ptr, &cc)); err != nil {
+	if err := resultError(C.ghostty_render_state_get(
+		rs.ptr,
+		C.GHOSTTY_RENDER_STATE_DATA_COLORS,
+		unsafe.Pointer(&cc),
+	)); err != nil {
 		return nil, err
 	}
 
@@ -179,6 +197,31 @@ func (rs *RenderState) Colors() (*RenderStateColors, error) {
 		result.Palette[i] = ColorRGB{R: uint8(c.r), G: uint8(c.g), B: uint8(c.b)}
 	}
 	return result, nil
+}
+
+// Cursor returns all cursor information from the render state in one call.
+// This is the preferred cursor read for render loops because it avoids the
+// separate cgo transition required by each scalar cursor getter.
+func (rs *RenderState) Cursor() (*RenderStateCursor, error) {
+	cc := C.init_render_state_cursor()
+	if err := resultError(C.ghostty_render_state_get(
+		rs.ptr,
+		C.GHOSTTY_RENDER_STATE_DATA_CURSOR,
+		unsafe.Pointer(&cc),
+	)); err != nil {
+		return nil, err
+	}
+
+	return &RenderStateCursor{
+		ViewportHasValue: bool(cc.viewport_has_value),
+		ViewportX:        uint16(cc.viewport_x),
+		ViewportY:        uint16(cc.viewport_y),
+		WideTail:         bool(cc.wide_tail),
+		Visible:          bool(cc.visible),
+		Blinking:         bool(cc.blinking),
+		PasswordInput:    bool(cc.password_input),
+		VisualStyle:      CursorVisualStyle(cc.visual_style),
+	}, nil
 }
 
 // GetMulti queries multiple render state data fields in a single cgo

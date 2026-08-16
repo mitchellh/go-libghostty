@@ -79,6 +79,47 @@ func TestRenderStateDirty(t *testing.T) {
 	}
 }
 
+func TestRenderStateClean(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+
+	if err := rs.Update(term); err != nil {
+		t.Fatal(err)
+	}
+	if err := rs.Clean(); err != nil {
+		t.Fatal(err)
+	}
+
+	dirty, err := rs.Dirty()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dirty != RenderStateDirtyFalse {
+		t.Fatalf("expected clean render state, got %d", dirty)
+	}
+
+	ri, err := NewRenderStateRowIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ri.Close()
+	if err := rs.RowIterator(ri); err != nil {
+		t.Fatal(err)
+	}
+	if y, ok := ri.NextDirty(); ok {
+		t.Fatalf("expected no dirty rows after Clean, got row %d", y)
+	}
+}
+
 func TestRenderStateColors(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {
@@ -178,6 +219,17 @@ func TestRenderStateCursor(t *testing.T) {
 	}
 	if x != 0 || y != 0 {
 		t.Fatalf("expected cursor at 0,0, got %d,%d", x, y)
+	}
+
+	cursor, err := rs.Cursor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cursor.ViewportHasValue || cursor.ViewportX != x || cursor.ViewportY != y {
+		t.Fatalf("unexpected bulk cursor viewport: %+v", cursor)
+	}
+	if !cursor.Visible {
+		t.Fatal("expected bulk cursor to be visible by default")
 	}
 }
 

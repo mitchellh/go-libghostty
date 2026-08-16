@@ -42,6 +42,10 @@ const (
 	// RenderStateRowDataSelection is the row-local selected cell range
 	// (GhosttyRenderStateRowSelection).
 	RenderStateRowDataSelection RenderStateRowData = C.GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION
+
+	// RenderStateRowDataCellsRaw is a borrowed view of all packed cell values
+	// in the current row (GhosttyCellsView).
+	RenderStateRowDataCellsRaw RenderStateRowData = C.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS_RAW
 )
 
 // RenderStateRowSelection is the row-local selected cell range.
@@ -92,6 +96,19 @@ func (ri *RenderStateRowIterator) Close() {
 // false when there are no more rows.
 func (ri *RenderStateRowIterator) Next() bool {
 	return bool(C.ghostty_render_state_row_iterator_next(ri.ptr))
+}
+
+// NextDirty advances to the next row that requires a redraw and returns its
+// viewport y coordinate. A full-dirty render state returns every remaining
+// row, a partial-dirty state skips clean rows, and a clean state returns false.
+// NextDirty does not clear any dirty state.
+// C: ghostty_render_state_row_iterator_next_dirty
+func (ri *RenderStateRowIterator) NextDirty() (uint16, bool) {
+	var y C.uint16_t
+	if !bool(C.ghostty_render_state_row_iterator_next_dirty(ri.ptr, &y)) {
+		return 0, false
+	}
+	return uint16(y), true
 }
 
 // GetMulti queries multiple render-state row data fields in a single
@@ -196,4 +213,23 @@ func (ri *RenderStateRowIterator) Cells(rc *RenderStateRowCells) error {
 		C.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS,
 		unsafe.Pointer(&rc.ptr),
 	))
+}
+
+// CellsRaw returns a borrowed, contiguous view of the packed cell values in
+// the current row. It avoids one cgo call per cell and is intended for render
+// paths that decode [Cell.PackedValue] using the layout from [TypeJSON].
+//
+// The view is invalidated by the next [RenderState.Update]. Call
+// [CellsView.Clone] when the values must outlive the current render state
+// snapshot.
+func (ri *RenderStateRowIterator) CellsRaw() (CellsView, error) {
+	var view C.GhosttyCellsView
+	if err := resultError(C.ghostty_render_state_row_get(
+		ri.ptr,
+		C.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS_RAW,
+		unsafe.Pointer(&view),
+	)); err != nil {
+		return CellsView{}, err
+	}
+	return cellsViewFromC(view), nil
 }

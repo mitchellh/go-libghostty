@@ -98,13 +98,62 @@ const (
 	RowDataDirty RowData = C.GHOSTTY_ROW_DATA_DIRTY
 )
 
-// Cell is a wrapper around an opaque terminal grid cell value.
-// Use getter methods to extract data from it. A Cell is a copied value
-// snapshot, not a borrowed handle, so it may be retained after the
-// [GridRef] or render-state iterator that produced it becomes invalid.
+// Cell is a wrapper around a packed terminal grid cell value. Portable callers
+// should use its typed getter methods. Callers that need to avoid per-field cgo
+// calls may read [Cell.PackedValue] and decode it using the GhosttyCell layout
+// in [TypeJSON]; the packed bit positions are not stable across versions.
+//
+// A Cell is a copied value snapshot, not a borrowed handle, so it may be
+// retained after the [GridRef] or render-state iterator that produced it
+// becomes invalid.
 // C: GhosttyCell
 type Cell struct {
 	c C.GhosttyCell
+}
+
+// CellsView is a borrowed view of contiguous packed terminal cell values.
+// Views are produced by [RenderStateRowIterator.CellsRaw] and are only valid
+// until the owning render state is updated. Individual cells returned by
+// [CellsView.Cell] and all values returned by [CellsView.Clone] are copied and
+// may be retained.
+// C: GhosttyCellsView
+type CellsView struct {
+	ptr *C.GhosttyCell
+	len int
+}
+
+// cellsViewFromC converts a borrowed C GhosttyCellsView to its Go wrapper.
+func cellsViewFromC(view C.GhosttyCellsView) CellsView {
+	return CellsView{
+		ptr: view.ptr,
+		len: int(view.len),
+	}
+}
+
+// Len returns the number of cells in the view.
+func (v CellsView) Len() int {
+	return v.len
+}
+
+// Cell returns a copied cell at index. It panics when index is outside the
+// view, matching normal Go slice indexing behavior.
+func (v CellsView) Cell(index int) *Cell {
+	return &Cell{c: unsafe.Slice(v.ptr, v.len)[index]}
+}
+
+// Clone copies every cell in the view into Go-owned memory. The returned cells
+// remain valid after the render state is updated.
+func (v CellsView) Clone() []Cell {
+	if v.len == 0 {
+		return nil
+	}
+
+	raw := unsafe.Slice(v.ptr, v.len)
+	result := make([]Cell, len(raw))
+	for i, cell := range raw {
+		result[i].c = cell
+	}
+	return result
 }
 
 // Row is a wrapper around an opaque terminal grid row value.
@@ -114,6 +163,13 @@ type Cell struct {
 // C: GhosttyRow
 type Row struct {
 	c C.GhosttyRow
+}
+
+// PackedValue returns the raw packed cell value. Decode it using the
+// GhosttyCell descriptor returned by [TypeJSON]; hardcoded bit positions are
+// unsupported because the packed layout is not ABI-stable.
+func (c *Cell) PackedValue() uint64 {
+	return uint64(c.c)
 }
 
 // CellContentTag describes what kind of content a cell holds.

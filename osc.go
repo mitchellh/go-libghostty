@@ -83,6 +83,15 @@ const (
 
 	// OSCCommandKittyTextSizing uses Kitty's text-sizing protocol.
 	OSCCommandKittyTextSizing OSCCommandType = C.GHOSTTY_OSC_COMMAND_KITTY_TEXT_SIZING
+
+	// OSCCommandKittyClipboardProtocol uses Kitty's clipboard protocol.
+	OSCCommandKittyClipboardProtocol OSCCommandType = C.GHOSTTY_OSC_COMMAND_KITTY_CLIPBOARD_PROTOCOL
+
+	// OSCCommandKittyDNDProtocol uses Kitty's drag-and-drop protocol.
+	OSCCommandKittyDNDProtocol OSCCommandType = C.GHOSTTY_OSC_COMMAND_KITTY_DND_PROTOCOL
+
+	// OSCCommandContextSignal carries a terminal context signal.
+	OSCCommandContextSignal OSCCommandType = C.GHOSTTY_OSC_COMMAND_CONTEXT_SIGNAL
 )
 
 // OSCCommandData identifies typed data extractable from an OSC command.

@@ -88,6 +88,62 @@ func TestRenderStateRowIteratorDirty(t *testing.T) {
 	}
 }
 
+func TestRenderStateRowIteratorNextDirty(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+	if err := rs.Update(term); err != nil {
+		t.Fatal(err)
+	}
+
+	ri, err := NewRenderStateRowIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ri.Close()
+	if err := rs.RowIterator(ri); err != nil {
+		t.Fatal(err)
+	}
+
+	for want := uint16(0); want < 24; want++ {
+		got, ok := ri.NextDirty()
+		if !ok {
+			t.Fatalf("expected dirty row %d", want)
+		}
+		if got != want {
+			t.Fatalf("expected dirty row %d, got %d", want, got)
+		}
+	}
+	if y, ok := ri.NextDirty(); ok {
+		t.Fatalf("expected dirty iterator exhaustion, got row %d", y)
+	}
+
+	if err := rs.Clean(); err != nil {
+		t.Fatal(err)
+	}
+	term.VTWrite([]byte("x"))
+	if err := rs.Update(term); err != nil {
+		t.Fatal(err)
+	}
+	if err := rs.RowIterator(ri); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := ri.NextDirty(); !ok || got != 0 {
+		t.Fatalf("expected only row 0 after a one-row update, got row %d (ok=%v)", got, ok)
+	}
+	if y, ok := ri.NextDirty(); ok {
+		t.Fatalf("expected one partial-dirty row, got extra row %d", y)
+	}
+}
+
 func TestRenderStateRowIteratorRaw(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {
@@ -134,6 +190,60 @@ func TestRenderStateRowIteratorRaw(t *testing.T) {
 	}
 	if wrap {
 		t.Fatal("expected first row not to be wrapped")
+	}
+}
+
+func TestRenderStateRowIteratorCellsRaw(t *testing.T) {
+	term, err := NewTerminal(WithSize(8, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.VTWrite([]byte("hello"))
+
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+	if err := rs.Update(term); err != nil {
+		t.Fatal(err)
+	}
+
+	ri, err := NewRenderStateRowIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ri.Close()
+	if err := rs.RowIterator(ri); err != nil {
+		t.Fatal(err)
+	}
+	if !ri.Next() {
+		t.Fatal("expected first row")
+	}
+
+	view, err := ri.CellsRaw()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Len() != 8 {
+		t.Fatalf("expected 8 cells, got %d", view.Len())
+	}
+	cell := view.Cell(0)
+	codepoint, err := cell.Codepoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if codepoint != 'h' {
+		t.Fatalf("expected first codepoint %U, got %U", 'h', codepoint)
+	}
+
+	cloned := view.Clone()
+	if len(cloned) != view.Len() {
+		t.Fatalf("expected %d cloned cells, got %d", view.Len(), len(cloned))
+	}
+	if cloned[0].PackedValue() != cell.PackedValue() {
+		t.Fatal("expected cloned packed value to match the borrowed view")
 	}
 }
 

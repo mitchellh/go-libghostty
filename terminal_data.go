@@ -168,6 +168,10 @@ const (
 	// TerminalDataVTGround indicates whether VT processing is between UTF-8
 	// codepoints and terminal sequences (bool).
 	TerminalDataVTGround TerminalData = C.GHOSTTY_TERMINAL_DATA_VT_GROUND
+
+	// TerminalDataCursorAtPrompt indicates whether the cursor is currently at
+	// a semantic shell prompt or input area (bool).
+	TerminalDataCursorAtPrompt TerminalData = C.GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT
 )
 
 // ActiveScreen returns which screen buffer is currently active.
@@ -272,6 +276,21 @@ func (t *Terminal) GetMulti(keys []TerminalData, values []unsafe.Pointer) error 
 		cVals,
 		nil,
 	))
+}
+
+// CursorAtPrompt reports whether the cursor is currently at a semantic shell
+// prompt or input area. It returns false when semantic prompt information is
+// unavailable or the alternate screen is active.
+func (t *Terminal) CursorAtPrompt() (bool, error) {
+	var v C.bool
+	if err := resultError(C.ghostty_terminal_get(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT,
+		unsafe.Pointer(&v),
+	)); err != nil {
+		return false, err
+	}
+	return bool(v), nil
 }
 
 // CursorPendingWrap reports whether the cursor has a pending wrap

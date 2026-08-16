@@ -331,6 +331,40 @@ func TestTerminalVTGround(t *testing.T) {
 	}
 }
 
+func TestTerminalCursorAtPrompt(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	atPrompt, err := term.CursorAtPrompt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if atPrompt {
+		t.Fatal("expected a fresh terminal not to be at a semantic prompt")
+	}
+
+	term.VTWrite([]byte("\x1b]133;A\x07"))
+	atPrompt, err = term.CursorAtPrompt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !atPrompt {
+		t.Fatal("expected OSC 133 prompt start to mark the cursor at a prompt")
+	}
+
+	term.VTWrite([]byte("\x1b[?1049h"))
+	atPrompt, err = term.CursorAtPrompt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if atPrompt {
+		t.Fatal("expected alternate screen to suppress semantic prompt state")
+	}
+}
+
 func TestTerminalColorRoundTrip(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {

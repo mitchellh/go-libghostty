@@ -27,6 +27,7 @@ import "C"
 //  1. Create an empty render state with NewRenderState.
 //  2. Update it from a terminal via Update whenever needed.
 //  3. Read from the render state to get data for drawing.
+//  4. Call Clean after successfully rendering the complete frame.
 //
 // C: GhosttyRenderState
 type RenderState struct {
@@ -67,6 +68,39 @@ const (
 	// CursorVisualStyleBlockHollow is a hollow block cursor.
 	CursorVisualStyleBlockHollow CursorVisualStyle = C.GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW
 )
+
+// RenderStateCursor holds all cursor information from a render state,
+// retrieved in a single call via the sized-struct API.
+//
+// ViewportX, ViewportY, and WideTail are only valid when ViewportHasValue is
+// true. The remaining fields are always populated.
+// C: GhosttyRenderStateCursor
+type RenderStateCursor struct {
+	// ViewportHasValue reports whether the cursor is visible within the
+	// viewport. When false, the viewport position and WideTail are undefined.
+	ViewportHasValue bool
+
+	// ViewportX is the cursor's viewport column in cells.
+	ViewportX uint16
+
+	// ViewportY is the cursor's viewport row in cells.
+	ViewportY uint16
+
+	// WideTail reports whether the cursor is on the tail of a wide character.
+	WideTail bool
+
+	// Visible reports whether terminal modes make the cursor visible.
+	Visible bool
+
+	// Blinking reports whether terminal modes make the cursor blink.
+	Blinking bool
+
+	// PasswordInput reports whether the cursor is at a password input field.
+	PasswordInput bool
+
+	// VisualStyle is the visual shape of the cursor.
+	VisualStyle CursorVisualStyle
+}
 
 // RenderStateColors holds all color information from a render state,
 // retrieved in a single call via the sized-struct API.
@@ -125,4 +159,15 @@ func (rs *RenderState) BeginUpdate(t *Terminal) error {
 // accesses render-state-owned memory and does not require terminal access.
 func (rs *RenderState) EndUpdate() error {
 	return resultError(C.ghostty_render_state_end_update(rs.ptr))
+}
+
+// Clean marks all render-state dirty data as consumed. It clears both the
+// global dirty state and every per-row dirty flag without modifying cell
+// contents or terminal-owned dirty state. Call Clean only after successfully
+// rendering a complete frame; partial consumers should clear only the state
+// they consumed with [RenderState.SetDirty] and
+// [RenderStateRowIterator.SetDirty].
+// C: ghostty_render_state_clean
+func (rs *RenderState) Clean() error {
+	return resultError(C.ghostty_render_state_clean(rs.ptr))
 }
