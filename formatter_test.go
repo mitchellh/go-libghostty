@@ -11,8 +11,8 @@ import (
 // Verify interface satisfaction at compile time.
 var _ io.WriterTo = (*Formatter)(nil)
 
-// shortFormatterWriter simulates a broken io.Writer that accepts only one
-// byte without reporting the required error.
+// shortFormatterWriter accepts one byte per call to verify that the shared
+// GhosttyWriter bridge retries short writes until it consumes each callback.
 type shortFormatterWriter struct {
 	bytes.Buffer
 }
@@ -265,15 +265,41 @@ func TestFormatterWriteToShortWrite(t *testing.T) {
 
 	var output shortFormatterWriter
 	n, err := f.WriteTo(&output)
-	if n != 1 {
-		t.Fatalf("expected one accepted byte, got %d", n)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !errors.Is(err, io.ErrShortWrite) {
-		t.Fatalf("expected io.ErrShortWrite, got %v", err)
+	if n != 4 {
+		t.Fatalf("expected four accepted bytes, got %d", n)
 	}
-	if output.String() != "a" {
-		t.Fatalf("expected accepted output %q, got %q", "a", output.String())
+	if output.String() != "abcd" {
+		t.Fatalf("expected accepted output %q, got %q", "abcd", output.String())
 	}
+}
+
+func TestFormatterWriteToError(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.VTWrite([]byte("formatter writer error"))
+
+	f, err := NewFormatter(term, WithFormatterFormat(FormatterFormatPlain))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	wantErr := errors.New("formatter sink failed")
+	w := &failingWriter{limit: 3, err: wantErr}
+	written, err := f.WriteTo(w)
+	if written != 3 {
+		t.Fatalf("expected three accepted bytes, got %d", written)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected original writer error, got %v", err)
+	}
+	assertResultError(t, err, ResultIOError)
 }
 
 func TestFormatterFormatBuf(t *testing.T) {

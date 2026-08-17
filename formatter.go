@@ -290,20 +290,19 @@ func (f *Formatter) FormatString() (string, error) {
 	return string(b), nil
 }
 
-// WriteTo implements io.WriterTo. It formats the current terminal
-// state and writes the entire output to w.
+// WriteTo implements io.WriterTo. It formats the current terminal state and
+// streams the output directly to w without first allocating the complete
+// formatted result. The writer is called synchronously and must not call
+// methods on f or its terminal. The returned count includes bytes accepted
+// before an error.
+// C: ghostty_formatter_format
 func (f *Formatter) WriteTo(w io.Writer) (int64, error) {
-	b, err := f.Format()
+	bridge, writer, err := newGhosttyWriter(w)
 	if err != nil {
 		return 0, err
 	}
-	n, err := w.Write(b)
-	// Writers are required to report an error when they accept fewer bytes
-	// than requested. Guard the io.WriterTo contract even when a faulty writer
-	// violates that requirement so truncated formatter output is not reported
-	// as a successful write.
-	if n != len(b) && err == nil {
-		err = io.ErrShortWrite
-	}
-	return int64(n), err
+	defer bridge.close()
+
+	result := C.ghostty_formatter_format(f.ptr, writer)
+	return bridge.written, resultErrorWithCallback(result, bridge.err)
 }
