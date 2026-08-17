@@ -60,16 +60,16 @@ type ghosttyReaderBridge struct {
 	eof        bool
 }
 
-// newGhosttyReader builds a C reader backed by r. The returned bridge must be
-// closed after the C object that retains the reader has been freed.
-func newGhosttyReader(r io.Reader) (*ghosttyReaderBridge, C.GhosttyReader, error) {
+// init initializes b to read from r and returns its C descriptor. The caller
+// must close b after the descriptor is no longer in use.
+func (b *ghosttyReaderBridge) init(r io.Reader) (C.GhosttyReader, error) {
 	if r == nil {
-		return nil, C.GhosttyReader{}, &Error{Result: ResultInvalidValue}
+		return C.GhosttyReader{}, &Error{Result: ResultInvalidValue}
 	}
 
-	b := &ghosttyReaderBridge{reader: r}
+	b.reader = r
 	b.handle = cgo.NewHandle(b)
-	return b, C.ghostty_go_reader(C.uintptr_t(b.handle)), nil
+	return C.ghostty_go_reader(C.uintptr_t(b.handle)), nil
 }
 
 // close releases the reader's cgo handle. It must be called only after C can
@@ -80,28 +80,50 @@ func (b *ghosttyReaderBridge) close() {
 	}
 	b.handle.Delete()
 	b.handle = 0
+	b.reader = nil
 }
 
-// ghosttyWriterBridge owns the cgo handle used by one synchronous writer
-// operation and records both the accepted byte count and the original Go
-// error, if any.
+// ghosttyWriterBridge adapts an io.Writer to GhosttyWriter. It records the
+// accepted byte count and the original Go error, if any.
 type ghosttyWriterBridge struct {
-	writer  io.Writer
-	handle  cgo.Handle
-	written int64
-	err     error
+	writer     io.Writer
+	handle     cgo.Handle
+	descriptor C.GhosttyWriter
+	written    int64
+	err        error
 }
 
 // newGhosttyWriter builds a C writer backed by w. The caller must close the
 // bridge after the synchronous libghostty operation returns.
 func newGhosttyWriter(w io.Writer) (*ghosttyWriterBridge, C.GhosttyWriter, error) {
+	b := &ghosttyWriterBridge{}
+	descriptor, err := b.reset(w)
+	if err != nil {
+		return nil, C.GhosttyWriter{}, err
+	}
+	return b, descriptor, nil
+}
+
+// reset prepares b to write to w. It reuses the existing handle and descriptor
+// when possible. Calls using the same bridge must be serialized.
+func (b *ghosttyWriterBridge) reset(w io.Writer) (C.GhosttyWriter, error) {
 	if w == nil {
-		return nil, C.GhosttyWriter{}, &Error{Result: ResultInvalidValue}
+		return C.GhosttyWriter{}, &Error{Result: ResultInvalidValue}
 	}
 
-	b := &ghosttyWriterBridge{writer: w}
-	b.handle = cgo.NewHandle(b)
-	return b, C.ghostty_go_writer(C.uintptr_t(b.handle)), nil
+	b.writer = w
+	b.written = 0
+	b.err = nil
+	if b.handle == 0 {
+		b.handle = cgo.NewHandle(b)
+		b.descriptor = C.ghostty_go_writer(C.uintptr_t(b.handle))
+	}
+	return b.descriptor, nil
+}
+
+// finish releases w but retains the C descriptor for reuse.
+func (b *ghosttyWriterBridge) finish() {
+	b.writer = nil
 }
 
 // close releases the writer's cgo handle.
@@ -111,6 +133,8 @@ func (b *ghosttyWriterBridge) close() {
 	}
 	b.handle.Delete()
 	b.handle = 0
+	b.descriptor = C.GhosttyWriter{}
+	b.writer = nil
 }
 
 // resultErrorWithCallback preserves libghostty's I/O result while also

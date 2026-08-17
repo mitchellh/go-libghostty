@@ -23,10 +23,8 @@ import (
 type Terminal struct {
 	ptr C.GhosttyTerminal
 
-	// handle is a cgo.Handle pointing back to this Terminal. It is
-	// stored as the C-side userdata (GHOSTTY_TERMINAL_OPT_USERDATA)
-	// so that C effect trampolines can recover the *Terminal and
-	// dispatch to the appropriate Go effect handler.
+	// handle identifies the terminal to effect callbacks. It is initialized
+	// lazily because terminals without effects do not need C userdata.
 	handle cgo.Handle
 
 	onWritePty            WritePtyFn
@@ -626,12 +624,11 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 	return t, nil
 }
 
-// terminalFromC wraps a caller-owned C terminal and installs the Go userdata
-// handle required by all terminal effect callbacks. Snapshot decoding uses
-// this path so restored terminals have the same lifecycle and effect support
-// as terminals created by NewTerminal.
+// terminalFromC wraps a caller-owned C terminal. Restored terminals use the
+// same lifecycle and effect support as terminals created by NewTerminal.
+// Effect callback data is initialized lazily by syncEffects.
 func terminalFromC(cterm C.GhosttyTerminal, cfg TerminalConfig) *Terminal {
-	t := &Terminal{
+	return &Terminal{
 		ptr:                   cterm,
 		onWritePty:            cfg.onWritePty,
 		onBell:                cfg.onBell,
@@ -647,21 +644,15 @@ func terminalFromC(cterm C.GhosttyTerminal, cfg TerminalConfig) *Terminal {
 		onDeviceAttributes:    cfg.onDeviceAttributes,
 		onUnknownSequence:     cfg.onUnknownSequence,
 	}
-
-	// Always set userdata to our handle so trampolines can find us.
-	t.handle = cgo.NewHandle(t)
-	C.ghostty_terminal_set(
-		t.ptr,
-		C.GHOSTTY_TERMINAL_OPT_USERDATA,
-		handleToPointer(t.handle),
-	)
-	return t
 }
 
 // Close frees the underlying terminal handle and releases the cgo.Handle.
 // After this call, the terminal must not be used.
 func (t *Terminal) Close() {
-	t.handle.Delete()
+	if t.handle != 0 {
+		t.handle.Delete()
+		t.handle = 0
+	}
 	C.ghostty_terminal_free(t.ptr)
 	if t.effectBuf != nil {
 		Free(t.effectBuf, t.effectBufLen)

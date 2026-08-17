@@ -91,6 +91,17 @@ import (
 // syncEffects registers or clears each C effect based on whether
 // the corresponding Go effect handler is set.
 func (t *Terminal) syncEffects() {
+	// Install userdata before registering the first callback. Terminals without
+	// callbacks do not need a handle.
+	if t.handle == 0 && t.hasEffects() {
+		t.handle = cgo.NewHandle(t)
+		C.ghostty_terminal_set(
+			t.ptr,
+			C.GHOSTTY_TERMINAL_OPT_USERDATA,
+			handleToPointer(t.handle),
+		)
+	}
+
 	if t.onWritePty != nil {
 		C.set_write_pty(t.ptr)
 	} else {
@@ -156,6 +167,24 @@ func (t *Terminal) syncEffects() {
 	} else {
 		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE)
 	}
+}
+
+// hasEffects reports whether any native effect trampoline needs to recover
+// this Terminal through userdata.
+func (t *Terminal) hasEffects() bool {
+	return t.onWritePty != nil ||
+		t.onBell != nil ||
+		t.onClipboardWrite != nil ||
+		t.onDesktopNotification != nil ||
+		t.onTitleChanged != nil ||
+		t.onPwdChanged != nil ||
+		t.onProgressReport != nil ||
+		t.onEnquiry != nil ||
+		t.onXtversion != nil ||
+		t.onSize != nil ||
+		t.onColorScheme != nil ||
+		t.onDeviceAttributes != nil ||
+		t.onUnknownSequence != nil
 }
 
 // terminalFromUserdata recovers a *Terminal from the C userdata pointer.

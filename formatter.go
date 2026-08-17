@@ -2,6 +2,7 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
+#include <string.h>
 
 // Helper to create a properly initialized GhosttyFormatterTerminalOptions (sized struct).
 static inline GhosttyFormatterTerminalOptions init_formatter_terminal_options() {
@@ -9,6 +10,85 @@ static inline GhosttyFormatterTerminalOptions init_formatter_terminal_options() 
 	opts.extra.size = sizeof(GhosttyFormatterTerminalExtra);
 	opts.extra.screen.size = sizeof(GhosttyFormatterScreenExtra);
 	return opts;
+}
+
+// Buffer small formatter writes before forwarding them to Go. Styled output
+// can contain hundreds of small writes, and crossing into Go for each one is
+// expensive. The buffer is flushed when full and when formatting completes;
+// large writes bypass it. libghostty formats synchronously and is fast, so
+// buffering is not expected to add noticeable latency.
+typedef struct {
+	GhosttyWriter downstream;
+	uint8_t* buffer;
+	size_t len;
+	size_t capacity;
+} ghostty_go_formatter_writer;
+
+static bool ghostty_go_formatter_writer_flush(
+	ghostty_go_formatter_writer* writer
+) {
+	if (writer->len == 0) return true;
+	if (!writer->downstream.write(
+		writer->downstream.userdata,
+		writer->buffer,
+		writer->len)) {
+		return false;
+	}
+	writer->len = 0;
+	return true;
+}
+
+static bool ghostty_go_formatter_writer_write(
+	void* userdata,
+	const uint8_t* data,
+	size_t len
+) {
+	ghostty_go_formatter_writer* writer = userdata;
+	while (len > 0) {
+		if (writer->len == 0 && len >= writer->capacity) {
+			return writer->downstream.write(
+				writer->downstream.userdata,
+				data,
+				len);
+		}
+
+		size_t available = writer->capacity - writer->len;
+		size_t count = len < available ? len : available;
+		memcpy(writer->buffer + writer->len, data, count);
+		writer->len += count;
+		data += count;
+		len -= count;
+
+		if (writer->len == writer->capacity &&
+			!ghostty_go_formatter_writer_flush(writer)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static inline GhosttyResult ghostty_go_formatter_format(
+	GhosttyFormatter formatter,
+	GhosttyWriter downstream
+) {
+	uint8_t buffer[16 * 1024];
+	ghostty_go_formatter_writer context = {
+		.downstream = downstream,
+		.buffer = buffer,
+		.len = 0,
+		.capacity = sizeof(buffer),
+	};
+	GhosttyWriter writer = {
+		.write = ghostty_go_formatter_writer_write,
+		.userdata = &context,
+	};
+
+	GhosttyResult result = ghostty_formatter_format(formatter, writer);
+	if (result != GHOSTTY_SUCCESS) return result;
+	if (!ghostty_go_formatter_writer_flush(&context)) {
+		return GHOSTTY_IO_ERROR;
+	}
+	return GHOSTTY_SUCCESS;
 }
 */
 import "C"
@@ -210,6 +290,9 @@ func (o *formatterOpts) prepare() (func(), error) {
 // C: GhosttyFormatter
 type Formatter struct {
 	ptr C.GhosttyFormatter
+
+	// writer is reused across WriteTo calls to avoid allocating cgo handles.
+	writer ghosttyWriterBridge
 }
 
 // NewFormatter creates a formatter for the given terminal's active screen.
@@ -241,6 +324,7 @@ func NewFormatter(t *Terminal, opts ...FormatterOption) (*Formatter, error) {
 // Close frees the formatter handle. After this call, the formatter
 // must not be used.
 func (f *Formatter) Close() {
+	f.writer.close()
 	C.ghostty_formatter_free(f.ptr)
 }
 
@@ -290,19 +374,25 @@ func (f *Formatter) FormatString() (string, error) {
 	return string(b), nil
 }
 
-// WriteTo implements io.WriterTo. It formats the current terminal state and
-// streams the output directly to w without first allocating the complete
-// formatted result. The writer is called synchronously and must not call
-// methods on f or its terminal. The returned count includes bytes accepted
-// before an error.
+// WriteTo implements io.WriterTo by formatting the current terminal state and
+// writing it to w. It does not allocate a buffer for the complete result. The
+// returned count includes bytes accepted before an error.
+//
+// WriteTo buffers small formatter writes to reduce calls into Go. The buffer
+// is flushed when full and when formatting completes. Since libghostty formats
+// quickly, buffering is not expected to add noticeable latency. WriteTo may
+// block if w blocks. The writer must not call methods on f or its terminal.
 // C: ghostty_formatter_format
 func (f *Formatter) WriteTo(w io.Writer) (int64, error) {
-	bridge, writer, err := newGhosttyWriter(w)
+	bridge := &f.writer
+	writer, err := bridge.reset(w)
 	if err != nil {
 		return 0, err
 	}
-	defer bridge.close()
 
-	result := C.ghostty_formatter_format(f.ptr, writer)
-	return bridge.written, resultErrorWithCallback(result, bridge.err)
+	result := C.ghostty_go_formatter_format(f.ptr, writer)
+	written := bridge.written
+	callbackErr := bridge.err
+	bridge.finish()
+	return written, resultErrorWithCallback(result, callbackErr)
 }

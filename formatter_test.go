@@ -249,6 +249,54 @@ func TestFormatterWriteTo(t *testing.T) {
 	}
 }
 
+func TestFormatterWriteToLargerThanBridgeBuffer(t *testing.T) {
+	const (
+		cols = 240
+		rows = 80
+	)
+	term, err := NewTerminal(WithSize(cols, rows), WithMaxScrollbackLines(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	line := bytes.Repeat([]byte{'x'}, cols-1)
+	input := make([]byte, 0, rows*(len(line)+2))
+	for row := range rows {
+		input = append(input, line...)
+		if row+1 < rows {
+			input = append(input, '\r', '\n')
+		}
+	}
+	term.VTWrite(input)
+
+	f, err := NewFormatter(term, WithFormatterFormat(FormatterFormatVT))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	want, err := f.Format()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(want) <= 16<<10 {
+		t.Fatalf("test output is only %d bytes; expected multiple bridge-buffer chunks", len(want))
+	}
+
+	var got bytes.Buffer
+	written, err := f.WriteTo(&got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written != int64(len(want)) {
+		t.Fatalf("WriteTo returned %d bytes, want %d", written, len(want))
+	}
+	if !bytes.Equal(got.Bytes(), want) {
+		t.Fatal("buffered WriteTo output differs from Format output")
+	}
+}
+
 func TestFormatterWriteToShortWrite(t *testing.T) {
 	term, err := NewTerminal(WithSize(4, 2))
 	if err != nil {
@@ -300,6 +348,16 @@ func TestFormatterWriteToError(t *testing.T) {
 		t.Fatalf("expected original writer error, got %v", err)
 	}
 	assertResultError(t, err, ResultIOError)
+
+	// A later call must not retain the previous writer error.
+	var recovered bytes.Buffer
+	written, err = f.WriteTo(&recovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written != int64(recovered.Len()) || !strings.Contains(recovered.String(), "formatter writer error") {
+		t.Fatalf("unexpected output after writer recovery: written=%d output=%q", written, recovered.String())
+	}
 }
 
 func TestFormatterFormatBuf(t *testing.T) {

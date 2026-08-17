@@ -305,6 +305,41 @@ func TestSnapshotDecoderBytesPinLifetime(t *testing.T) {
 	}
 }
 
+func TestSnapshotRestoredTerminalRegistersEffectLazily(t *testing.T) {
+	term := newSnapshotTerminal(t)
+	snapshot, err := term.Snapshot()
+	term.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decoder, err := NewSnapshotDecoderBytes(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoder.Close()
+	restored, err := decoder.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+
+	if restored.handle != 0 {
+		t.Fatal("restored terminal allocated an effect handle before registration")
+	}
+	bellCount := 0
+	restored.SetEffectBell(func(*Terminal) {
+		bellCount++
+	})
+	if restored.handle == 0 {
+		t.Fatal("restored terminal did not allocate an effect handle on demand")
+	}
+	restored.VTWrite([]byte{'\a'})
+	if bellCount != 1 {
+		t.Fatalf("expected one restored-terminal bell callback, got %d", bellCount)
+	}
+}
+
 func TestSnapshotReaderAndTrailingBytes(t *testing.T) {
 	term := newSnapshotTerminal(t)
 	defer term.Close()

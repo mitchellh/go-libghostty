@@ -188,6 +188,14 @@ type SnapshotDecoder struct {
 	sourceLen uintptr
 }
 
+// snapshotReaderDecoder stores a decoder and its reader bridge in one
+// allocation. The bridge remains separately addressable for use as C callback
+// data.
+type snapshotReaderDecoder struct {
+	decoder SnapshotDecoder
+	reader  ghosttyReaderBridge
+}
+
 // Snapshot encodes a complete terminal snapshot and returns a Go-owned copy.
 // Calls must be serialized with every other operation on t. Callers taking
 // repeated snapshots can use [Terminal.SnapshotBuf] with a reusable buffer to
@@ -255,18 +263,21 @@ func (t *Terminal) SnapshotWriteTo(w io.Writer) (int64, error) {
 // zero-byte read is permanent EOF; nonblocking readers must wait internally.
 // C: ghostty_snapshot_decoder_new
 func NewSnapshotDecoder(r io.Reader) (*SnapshotDecoder, error) {
-	bridge, reader, err := newGhosttyReader(r)
+	holder := &snapshotReaderDecoder{}
+	reader, err := holder.reader.init(r)
 	if err != nil {
 		return nil, err
 	}
 
 	result := C.ghostty_go_snapshot_decoder_new(reader)
 	if err := resultError(result.result); err != nil {
-		bridge.close()
+		holder.reader.close()
 		return nil, err
 	}
 
-	return &SnapshotDecoder{ptr: result.decoder, reader: bridge}, nil
+	holder.decoder.ptr = result.decoder
+	holder.decoder.reader = &holder.reader
+	return &holder.decoder, nil
 }
 
 // NewSnapshotDecoderBytes creates a zero-copy snapshot decoder over data. The

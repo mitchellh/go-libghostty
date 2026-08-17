@@ -1,6 +1,7 @@
 package libghostty
 
 import (
+	"bytes"
 	"strconv"
 	"testing"
 )
@@ -102,11 +103,9 @@ func BenchmarkSnapshotEncode(b *testing.B) {
 	}
 }
 
-// BenchmarkSnapshotDecode measures complete restoration and the READY-prefix
-// latency exposed for applications that can show a terminal before its older
-// history pages have been restored. Each mode compares the normal zero-copy
-// byte source with the mutation-safe copying constructor so the input-copy
-// cost remains visible as snapshots grow.
+// BenchmarkSnapshotDecode measures complete restoration and the latency to a
+// renderable terminal. It compares zero-copy and copying byte sources with a
+// callback-backed reader.
 func BenchmarkSnapshotDecode(b *testing.B) {
 	for _, test := range snapshotBenchmarkCases {
 		b.Run(test.name, func(b *testing.B) {
@@ -118,6 +117,12 @@ func BenchmarkSnapshotDecode(b *testing.B) {
 			}{
 				{name: "ZeroCopy", new: NewSnapshotDecoderBytes},
 				{name: "Copy", new: NewSnapshotDecoderBytesCopy},
+				{
+					name: "Reader",
+					new: func(snapshot []byte) (*SnapshotDecoder, error) {
+						return NewSnapshotDecoder(bytes.NewReader(snapshot))
+					},
+				},
 			} {
 				b.Run("Full/"+source.name, func(b *testing.B) {
 					benchmarkSnapshotDecode(b, snapshot, source.new, false)
@@ -130,8 +135,8 @@ func BenchmarkSnapshotDecode(b *testing.B) {
 	}
 }
 
-// benchmarkSnapshotDecode owns the complete per-iteration lifecycle. READY
-// terminals must outlive their decoders until the decoder is closed.
+// benchmarkSnapshotDecode runs the complete decoder lifecycle. A terminal
+// returned by Ready remains alive until its decoder is closed.
 func benchmarkSnapshotDecode(
 	b *testing.B,
 	snapshot []byte,
