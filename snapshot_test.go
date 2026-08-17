@@ -109,6 +109,13 @@ func TestSnapshotEncodeFormsAndDecode(t *testing.T) {
 	if limit != 4096 {
 		t.Fatalf("expected decoder continuation limit 4096, got %d", limit)
 	}
+	retain, err := decoder.RetainContinuation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retain {
+		t.Fatal("expected continuation retention to be disabled by default")
+	}
 	offset, err := decoder.SourceOffset()
 	if err != nil {
 		t.Fatal(err)
@@ -163,6 +170,64 @@ func TestSnapshotEncodeFormsAndDecode(t *testing.T) {
 	}
 }
 
+func TestSnapshotDecodeRetainsContinuation(t *testing.T) {
+	term := newSnapshotTerminal(t)
+	defer term.Close()
+
+	snapshot, err := term.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder, err := NewSnapshotDecoderBytes(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoder.Close()
+
+	const limit = 4096
+	if err := decoder.SetMaxContinuationBytes(limit); err != nil {
+		t.Fatal(err)
+	}
+	if err := decoder.SetRetainContinuation(true); err != nil {
+		t.Fatal(err)
+	}
+	retain, err := decoder.RetainContinuation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !retain {
+		t.Fatal("expected continuation retention to be enabled")
+	}
+
+	restored, err := decoder.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+
+	continuationLimit, err := restored.ContinuationMaxBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if continuationLimit != limit {
+		t.Fatalf("expected restored continuation limit %d, got %d", limit, continuationLimit)
+	}
+	continuation, err := restored.Continuation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(continuation) != "\x1b[31" {
+		t.Fatalf("expected restored continuation %q, got %q", "\x1b[31", continuation)
+	}
+
+	// Exporting an empty or nonempty continuation does not disable tracking.
+	// Disable it before supplying any post-snapshot input when the caller no
+	// longer needs to observe continuation state.
+	if err := restored.SetContinuationMaxBytes(0); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSnapshotIncrementalDecode(t *testing.T) {
 	term, err := NewTerminal(
 		WithSize(215, 2),
@@ -207,6 +272,11 @@ func TestSnapshotIncrementalDecode(t *testing.T) {
 	assertResultError(t, err, ResultNoValue)
 	if err := decoder.SetMaxContinuationBytes(1); err == nil {
 		t.Fatal("expected lifecycle error when setting decoder option after READY")
+	} else {
+		assertResultError(t, err, ResultInvalidValue)
+	}
+	if err := decoder.SetRetainContinuation(true); err == nil {
+		t.Fatal("expected lifecycle error when retaining continuation after READY")
 	} else {
 		assertResultError(t, err, ResultInvalidValue)
 	}

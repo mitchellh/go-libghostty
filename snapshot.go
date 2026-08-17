@@ -119,8 +119,14 @@ type SnapshotDecoderOption int
 
 const (
 	// SnapshotDecoderOptionMaxContinuationBytes is the largest non-ground VT
-	// continuation the decoder will accept (size_t).
+	// continuation the decoder will accept (size_t). When continuation
+	// retention is enabled, this is also the tracking limit on the returned
+	// terminal.
 	SnapshotDecoderOptionMaxContinuationBytes SnapshotDecoderOption = C.GHOSTTY_SNAPSHOT_DECODER_OPT_MAX_CONTINUATION_BYTES
+
+	// SnapshotDecoderOptionRetainContinuation controls whether the returned
+	// terminal retains the decoded continuation (bool).
+	SnapshotDecoderOptionRetainContinuation SnapshotDecoderOption = C.GHOSTTY_SNAPSHOT_DECODER_OPT_RETAIN_CONTINUATION
 )
 
 // SnapshotDecoderData identifies a data field available from a
@@ -159,6 +165,10 @@ const (
 	// SnapshotDecoderDataProgressRemaining is the number of page records
 	// remaining in the current screen's history sequence (uint32_t).
 	SnapshotDecoderDataProgressRemaining SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_REMAINING
+
+	// SnapshotDecoderDataRetainContinuation reports whether continuation
+	// tracking is retained on returned terminals (bool).
+	SnapshotDecoderDataRetainContinuation SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_RETAIN_CONTINUATION
 )
 
 // SnapshotDecoder incrementally decodes and validates one terminal
@@ -370,14 +380,30 @@ func (d *SnapshotDecoder) releaseSource() {
 }
 
 // SetMaxContinuationBytes sets the largest non-ground VT continuation the
-// decoder will accept. It may only be called before decoding begins. Zero
-// accepts only snapshots whose parser and UTF-8 decoder are at ground.
+// decoder will accept. When [SnapshotDecoder.SetRetainContinuation] is true,
+// this also becomes the continuation tracking limit on the returned terminal.
+// It may only be called before decoding begins. Zero accepts only snapshots
+// whose parser and UTF-8 decoder are at ground and leaves tracking disabled.
 // C: ghostty_snapshot_decoder_set
 func (d *SnapshotDecoder) SetMaxContinuationBytes(limit uint) error {
 	v := C.size_t(limit)
 	return resultError(C.ghostty_snapshot_decoder_set(
 		d.ptr,
 		C.GHOSTTY_SNAPSHOT_DECODER_OPT_MAX_CONTINUATION_BYTES,
+		unsafe.Pointer(&v),
+	))
+}
+
+// SetRetainContinuation controls whether the returned terminal retains the
+// exact continuation decoded from the snapshot. Retention is disabled by
+// default and requires a nonzero maximum continuation size to enable tracking
+// on the returned terminal. It may only be called before decoding begins.
+// C: ghostty_snapshot_decoder_set
+func (d *SnapshotDecoder) SetRetainContinuation(retain bool) error {
+	v := C.bool(retain)
+	return resultError(C.ghostty_snapshot_decoder_set(
+		d.ptr,
+		C.GHOSTTY_SNAPSHOT_DECODER_OPT_RETAIN_CONTINUATION,
 		unsafe.Pointer(&v),
 	))
 }
@@ -478,6 +504,8 @@ func (d *SnapshotDecoder) GetMulti(keys []SnapshotDecoderData, values []unsafe.P
 }
 
 // MaxContinuationBytes returns the decoder's current continuation input limit.
+// When [SnapshotDecoder.RetainContinuation] is true, this is also the tracking
+// limit applied to the returned terminal.
 func (d *SnapshotDecoder) MaxContinuationBytes() (uint, error) {
 	var value C.size_t
 	if err := d.Get(
@@ -487,6 +515,19 @@ func (d *SnapshotDecoder) MaxContinuationBytes() (uint, error) {
 		return 0, err
 	}
 	return uint(value), nil
+}
+
+// RetainContinuation reports whether decoded continuation tracking will be
+// retained on terminals returned by Ready or Decode.
+func (d *SnapshotDecoder) RetainContinuation() (bool, error) {
+	var value C.bool
+	if err := d.Get(
+		SnapshotDecoderDataRetainContinuation,
+		unsafe.Pointer(&value),
+	); err != nil {
+		return false, err
+	}
+	return value != C.bool(false), nil
 }
 
 // SourceOffset returns the number of snapshot source bytes consumed so far.
