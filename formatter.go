@@ -253,5 +253,12 @@ func (f *Formatter) WriteTo(w io.Writer) (int64, error) {
 		return 0, err
 	}
 	n, err := w.Write(b)
+	// Writers are required to report an error when they accept fewer bytes
+	// than requested. Guard the io.WriterTo contract even when a faulty writer
+	// violates that requirement so truncated formatter output is not reported
+	// as a successful write.
+	if n != len(b) && err == nil {
+		err = io.ErrShortWrite
+	}
 	return int64(n), err
 }

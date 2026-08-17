@@ -11,6 +11,16 @@ import (
 // Verify interface satisfaction at compile time.
 var _ io.WriterTo = (*Formatter)(nil)
 
+// shortFormatterWriter simulates a broken io.Writer that accepts only one
+// byte without reporting the required error.
+type shortFormatterWriter struct {
+	bytes.Buffer
+}
+
+func (w *shortFormatterWriter) Write(p []byte) (int, error) {
+	return w.Buffer.Write(p[:1])
+}
+
 func TestFormatterPlainText(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {
@@ -173,6 +183,33 @@ func TestFormatterWriteTo(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "writeto test") {
 		t.Fatalf("expected output to contain 'writeto test', got %q", buf.String())
+	}
+}
+
+func TestFormatterWriteToShortWrite(t *testing.T) {
+	term, err := NewTerminal(WithSize(4, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.VTWrite([]byte("abcd"))
+
+	f, err := NewFormatter(term, WithFormatterFormat(FormatterFormatPlain))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	var output shortFormatterWriter
+	n, err := f.WriteTo(&output)
+	if n != 1 {
+		t.Fatalf("expected one accepted byte, got %d", n)
+	}
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("expected io.ErrShortWrite, got %v", err)
+	}
+	if output.String() != "a" {
+		t.Fatalf("expected accepted output %q, got %q", "a", output.String())
 	}
 }
 
