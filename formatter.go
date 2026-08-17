@@ -37,7 +37,8 @@ const (
 // can mutate it directly. Only fields explicitly set by an option are
 // modified; everything else retains the GHOSTTY_INIT_SIZED defaults.
 type formatterOpts struct {
-	c C.GhosttyFormatterTerminalOptions
+	c         C.GhosttyFormatterTerminalOptions
+	selection *Selection
 }
 
 // FormatterOption is a functional option for configuring a Formatter.
@@ -63,6 +64,21 @@ func WithFormatterUnwrap(unwrap bool) FormatterOption {
 func WithFormatterTrim(trim bool) FormatterOption {
 	return func(o *formatterOpts) {
 		o.c.trim = C.bool(trim)
+	}
+}
+
+// WithFormatterSelection restricts formatter output to sel. Passing nil
+// formats the entire active screen.
+//
+// The selection must come from the same terminal passed to [NewFormatter] and
+// must still be valid when NewFormatter is called. NewFormatter copies the
+// selection immediately, so the Selection value itself does not need to
+// outlive that call. The copied selection still contains borrowed grid
+// references into the terminal; as with every [Selection], later terminal
+// mutations may invalidate those references.
+func WithFormatterSelection(sel *Selection) FormatterOption {
+	return func(o *formatterOpts) {
+		o.selection = sel
 	}
 }
 
@@ -159,6 +175,30 @@ func WithFormatterExtraCharsets(v bool) FormatterOption {
 	}
 }
 
+// prepare materializes the selection option in C-owned memory for the
+// formatter constructor. libghostty copies the selection into the formatter
+// during ghostty_formatter_terminal_new, so this allocation only needs to
+// remain alive for that call. Using C-owned memory also avoids placing a Go
+// pointer inside the C options struct passed through cgo.
+func (o *formatterOpts) prepare() (func(), error) {
+	if o.selection == nil {
+		return func() {}, nil
+	}
+
+	size := uintptr(C.sizeof_GhosttySelection)
+	ptr := Alloc(size)
+	if ptr == nil {
+		return nil, &Error{Result: ResultOutOfMemory}
+	}
+	csel := (*C.GhosttySelection)(ptr)
+	*csel = o.selection.toC()
+	o.c.selection = csel
+
+	return func() {
+		Free(ptr, size)
+	}, nil
+}
+
 // Formatter wraps a Ghostty formatter handle that can produce
 // plain text, VT sequences, or HTML from a terminal's current state.
 // The formatter stores a borrowed reference to a terminal, so the
@@ -184,6 +224,11 @@ func NewFormatter(t *Terminal, opts ...FormatterOption) (*Formatter, error) {
 	for _, opt := range opts {
 		opt(&fo)
 	}
+	cleanup, err := fo.prepare()
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
 
 	var ptr C.GhosttyFormatter
 	if err := resultError(C.ghostty_formatter_terminal_new(nil, &ptr, t.ptr, fo.c)); err != nil {

@@ -156,6 +156,69 @@ func TestFormatterReflectsCurrentState(t *testing.T) {
 	}
 }
 
+func TestFormatterSelection(t *testing.T) {
+	term, err := NewTerminal(WithSize(20, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	term.VTWrite([]byte("first\r\nsecond\r\nthird"))
+
+	secondRef, err := term.GridRef(Point{Tag: PointTagActive, X: 2, Y: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := term.SelectLine(SelectLineOptions{Ref: secondRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second == nil {
+		t.Fatal("expected second-line selection")
+	}
+
+	f, err := NewFormatter(
+		term,
+		WithFormatterFormat(FormatterFormatVT),
+		WithFormatterTrim(true),
+		WithFormatterSelection(second),
+		WithFormatterExtraCursor(true),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	// The native formatter copies the selection during construction. Changing
+	// the caller's Go value afterward must not change the formatter's range.
+	firstRef, err := term.GridRef(Point{Tag: PointTagActive, X: 2, Y: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := term.SelectLine(SelectLineOptions{Ref: firstRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == nil {
+		t.Fatal("expected first-line selection")
+	}
+	*second = *first
+
+	out, err := f.FormatString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "second") {
+		t.Fatalf("expected selected line in formatter output, got %q", out)
+	}
+	if strings.Contains(out, "first") || strings.Contains(out, "third") {
+		t.Fatalf("expected output to be restricted to the selected line, got %q", out)
+	}
+	if !strings.Contains(out, "\x1b[") {
+		t.Fatalf("expected VT terminal extras alongside selected output, got %q", out)
+	}
+}
+
 func TestFormatterWriteTo(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {
