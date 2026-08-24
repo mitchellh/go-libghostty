@@ -14,7 +14,8 @@ package libghostty
 // addresses on the C side.
 extern void goWritePtyTrampoline(GhosttyTerminal, void*, uint8_t*, size_t);
 extern void goBellTrampoline(GhosttyTerminal, void*);
-extern GhosttyClipboardWriteResult goClipboardWriteTrampoline(GhosttyTerminal, void*, GhosttyClipboardWrite*);
+extern void goClipboardWriteTrampoline(GhosttyTerminal, void*, GhosttyClipboardWrite*);
+extern void goClipboardReadTrampoline(GhosttyTerminal, void*, GhosttyClipboardRead*);
 extern void goDesktopNotificationTrampoline(GhosttyTerminal, void*, GhosttyTerminalDesktopNotification*);
 extern void goTitleChangedTrampoline(GhosttyTerminal, void*);
 extern void goPwdChangedTrampoline(GhosttyTerminal, void*);
@@ -37,6 +38,9 @@ static inline GhosttyResult set_bell(GhosttyTerminal t) {
 }
 static inline GhosttyResult set_clipboard_write(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, (const void*)goClipboardWriteTrampoline);
+}
+static inline GhosttyResult set_clipboard_read(GhosttyTerminal t) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_CLIPBOARD_READ, (const void*)goClipboardReadTrampoline);
 }
 static inline GhosttyResult set_desktop_notification(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION, (const void*)goDesktopNotificationTrampoline);
@@ -80,6 +84,19 @@ static inline const GhosttyTerminalUnknownStringSequence* unknown_sequence_apc(
 static inline GhosttyResult clear_effect(GhosttyTerminal t, GhosttyTerminalOption opt) {
 	return ghostty_terminal_set(t, opt, NULL);
 }
+
+// Invoke reply function pointers stored in borrowed clipboard requests. Cgo
+// cannot call C function pointers directly.
+static inline void reply_clipboard_write(
+		const GhosttyClipboardWrite* write,
+		const GhosttyClipboardWriteReply* reply) {
+	if (write != NULL && write->reply != NULL) write->reply(write, reply);
+}
+static inline void reply_clipboard_read(
+		const GhosttyClipboardRead* read,
+		const GhosttyClipboardReadReply* reply) {
+	if (read != NULL && read->reply != NULL) read->reply(read, reply);
+}
 */
 import "C"
 
@@ -116,6 +133,11 @@ func (t *Terminal) syncEffects() {
 		C.set_clipboard_write(t.ptr)
 	} else {
 		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE)
+	}
+	if t.onClipboardRead != nil {
+		C.set_clipboard_read(t.ptr)
+	} else {
+		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_CLIPBOARD_READ)
 	}
 	if t.onDesktopNotification != nil {
 		C.set_desktop_notification(t.ptr)
@@ -175,6 +197,7 @@ func (t *Terminal) hasEffects() bool {
 	return t.onWritePty != nil ||
 		t.onBell != nil ||
 		t.onClipboardWrite != nil ||
+		t.onClipboardRead != nil ||
 		t.onDesktopNotification != nil ||
 		t.onTitleChanged != nil ||
 		t.onPwdChanged != nil ||
@@ -209,77 +232,230 @@ func goBellTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer) {
 }
 
 //export goClipboardWriteTrampoline
-func goClipboardWriteTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer, write *C.GhosttyClipboardWrite) C.GhosttyClipboardWriteResult {
+func goClipboardWriteTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer, write *C.GhosttyClipboardWrite) {
 	t := terminalFromUserdata(userdata)
-	if t.onClipboardWrite == nil {
-		return C.GHOSTTY_CLIPBOARD_WRITE_RESULT_UNSUPPORTED
-	}
 
 	// GhosttyClipboardWrite is a sized struct so newer libghostty versions
 	// can extend it without breaking existing callbacks. Only read the fields
 	// this binding knows about when the descriptor contains the full current
 	// layout.
 	if write == nil || write.size < C.size_t(C.sizeof_GhosttyClipboardWrite) {
-		return C.GHOSTTY_CLIPBOARD_WRITE_RESULT_INVALID_DATA
+		return
+	}
+	if t.onClipboardWrite == nil {
+		replyClipboardWrite(write, ClipboardWriteReply{Result: ClipboardWriteUnsupported})
+		return
 	}
 
-	count, ok := ghosttySizeToInt(write.contents_len)
-	if !ok || (count > 0 && write.contents == nil) {
-		return C.GHOSTTY_CLIPBOARD_WRITE_RESULT_INVALID_DATA
+	contents, ok := copyClipboardContents(write.contents, write.contents_len)
+	if !ok {
+		replyClipboardWrite(write, ClipboardWriteReply{Result: ClipboardWriteInvalidData})
+		return
+	}
+	name, ok := copyGhosttyString(write.name)
+	if !ok {
+		replyClipboardWrite(write, ClipboardWriteReply{Result: ClipboardWriteInvalidData})
+		return
 	}
 
-	contents := make([]ClipboardContent, count)
-	if count > 0 {
-		cContents := unsafe.Slice(write.contents, count)
-		for i, content := range cContents {
-			mime, valid := copyGhosttyString(content.mime)
-			if !valid {
-				return C.GHOSTTY_CLIPBOARD_WRITE_RESULT_INVALID_DATA
-			}
-			data, valid := copyGhosttyString(content.data)
-			if !valid {
-				return C.GHOSTTY_CLIPBOARD_WRITE_RESULT_INVALID_DATA
-			}
+	reply := t.onClipboardWrite(t, ClipboardWrite{
+		Location:    ClipboardLocation(write.location),
+		Contents:    contents,
+		Name:        string(name),
+		Granted:     bool(write.granted),
+		CanRemember: bool(write.can_remember),
+	})
+	replyClipboardWrite(write, reply)
+}
 
-			contents[i] = ClipboardContent{
-				MIME: string(mime),
-				Data: data,
+// replyClipboardWrite answers a borrowed C clipboard-write request before its
+// callback lifetime ends.
+func replyClipboardWrite(write *C.GhosttyClipboardWrite, reply ClipboardWriteReply) {
+	cReply := C.GhosttyClipboardWriteReply{
+		size:     C.size_t(C.sizeof_GhosttyClipboardWriteReply),
+		result:   C.GhosttyClipboardWriteResult(reply.Result),
+		remember: C.bool(reply.Remember),
+	}
+	C.reply_clipboard_write(write, &cReply)
+}
+
+//export goClipboardReadTrampoline
+func goClipboardReadTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer, read *C.GhosttyClipboardRead) {
+	t := terminalFromUserdata(userdata)
+
+	// A short descriptor does not safely expose the reply function pointer, so
+	// returning without a reply deliberately selects libghostty's denied
+	// fallback.
+	if read == nil || read.size < C.size_t(C.sizeof_GhosttyClipboardRead) {
+		return
+	}
+	if t.onClipboardRead == nil {
+		replyClipboardRead(read, ClipboardReadReply{Result: ClipboardReadUnsupported})
+		return
+	}
+
+	mimes, ok := copyGhosttyStringArray(read.mimes, read.mimes_len)
+	if !ok {
+		replyClipboardRead(read, ClipboardReadReply{Result: ClipboardReadIOError})
+		return
+	}
+	name, ok := copyGhosttyString(read.name)
+	if !ok {
+		replyClipboardRead(read, ClipboardReadReply{Result: ClipboardReadIOError})
+		return
+	}
+
+	reply := t.onClipboardRead(t, ClipboardRead{
+		Location:    ClipboardLocation(read.location),
+		MIMEs:       mimes,
+		List:        bool(read.list),
+		Name:        string(name),
+		Granted:     bool(read.granted),
+		CanRemember: bool(read.can_remember),
+	})
+	replyClipboardRead(read, reply)
+}
+
+// replyClipboardRead copies a Go reply into C-owned temporary buffers and
+// invokes the request's synchronous reply function. Allocation failures are
+// reported to the running program as clipboard I/O errors.
+func replyClipboardRead(read *C.GhosttyClipboardRead, reply ClipboardReadReply) {
+	cReply := C.GhosttyClipboardReadReply{
+		size:     C.size_t(C.sizeof_GhosttyClipboardReadReply),
+		result:   C.GhosttyClipboardReadResult(reply.Result),
+		remember: C.bool(reply.Remember),
+	}
+
+	var contents *cGhosttyClipboardContents
+	var available *cGhosttyStringArray
+	if reply.Result == ClipboardReadSuccess {
+		var err error
+		contents, err = newCGhosttyClipboardContents(reply.Contents)
+		if err == nil {
+			availableValues := make([][]byte, len(reply.Available))
+			for i, mime := range reply.Available {
+				availableValues[i] = []byte(mime)
 			}
+			available, err = newCGhosttyStringArray(availableValues)
+		}
+		if err != nil {
+			if contents != nil {
+				contents.close()
+				contents = nil
+			}
+			cReply.result = C.GHOSTTY_CLIPBOARD_READ_RESULT_IO_ERROR
+			cReply.remember = C.bool(false)
+		} else {
+			cReply.contents = contents.ptr
+			cReply.contents_len = C.size_t(len(reply.Contents))
+			cReply.available = available.ptr
+			cReply.available_len = C.size_t(len(reply.Available))
 		}
 	}
 
-	result := t.onClipboardWrite(t, ClipboardWrite{
-		Location: ClipboardLocation(write.location),
-		Contents: contents,
-	})
-	return C.GhosttyClipboardWriteResult(result)
-}
-
-// ghosttySizeToInt converts a C size to a Go slice length without allowing
-// an overflowing conversion to produce an invalid unsafe.Slice length.
-func ghosttySizeToInt(size C.size_t) (int, bool) {
-	if uint64(size) > uint64(^uint(0)>>1) {
-		return 0, false
+	C.reply_clipboard_read(read, &cReply)
+	if available != nil {
+		available.close()
 	}
-	return int(size), true
+	if contents != nil {
+		contents.close()
+	}
 }
 
-// copyGhosttyString copies a borrowed, binary-safe GhosttyString into Go
-// memory. For zero-length strings the pointer is intentionally ignored
-// because libghostty does not require it to be valid.
-func copyGhosttyString(value C.GhosttyString) ([]byte, bool) {
-	length, ok := ghosttySizeToInt(value.len)
-	if !ok {
+// copyClipboardContents copies borrowed C clipboard representations into
+// Go-owned memory.
+func copyClipboardContents(values *C.GhosttyClipboardContent, count C.size_t) ([]ClipboardContent, bool) {
+	length, ok := ghosttySizeToInt(count)
+	if !ok || (length > 0 && values == nil) {
 		return nil, false
 	}
+
+	result := make([]ClipboardContent, length)
 	if length == 0 {
-		return []byte{}, true
+		return result, true
 	}
-	if value.ptr == nil {
-		return nil, false
+	for i, content := range unsafe.Slice(values, length) {
+		mime, valid := copyGhosttyString(content.mime)
+		if !valid {
+			return nil, false
+		}
+		data, valid := copyGhosttyString(content.data)
+		if !valid {
+			return nil, false
+		}
+		result[i] = ClipboardContent{MIME: string(mime), Data: data}
+	}
+	return result, true
+}
+
+// cGhosttyClipboardContents owns a C array of clipboard-content descriptors
+// and every C string referenced by the array.
+type cGhosttyClipboardContents struct {
+	ptr            *C.GhosttyClipboardContent
+	descriptorPtr  unsafe.Pointer
+	descriptorSize uintptr
+	strings        *cGhosttyStringArray
+}
+
+// newCGhosttyClipboardContents copies Go clipboard representations into C
+// memory suitable for a synchronous GhosttyClipboardReadReply.
+func newCGhosttyClipboardContents(values []ClipboardContent) (*cGhosttyClipboardContents, error) {
+	owner := &cGhosttyClipboardContents{}
+	if len(values) == 0 {
+		return owner, nil
+	}
+	if len(values) > int(^uint(0)>>1)/2 {
+		return nil, &Error{Result: ResultLimitExceeded}
 	}
 
-	return append([]byte(nil), unsafe.Slice((*byte)(unsafe.Pointer(value.ptr)), length)...), true
+	strings := make([][]byte, len(values)*2)
+	for i, value := range values {
+		strings[i*2] = []byte(value.MIME)
+		strings[i*2+1] = value.Data
+	}
+	stringOwner, err := newCGhosttyStringArray(strings)
+	if err != nil {
+		return nil, err
+	}
+	owner.strings = stringOwner
+
+	elementSize := uintptr(C.sizeof_GhosttyClipboardContent)
+	if uintptr(len(values)) > ^uintptr(0)/elementSize {
+		owner.close()
+		return nil, &Error{Result: ResultLimitExceeded}
+	}
+	owner.descriptorSize = uintptr(len(values)) * elementSize
+	owner.descriptorPtr = Alloc(owner.descriptorSize)
+	if owner.descriptorPtr == nil {
+		owner.close()
+		return nil, &Error{Result: ResultOutOfMemory}
+	}
+	owner.ptr = (*C.GhosttyClipboardContent)(owner.descriptorPtr)
+
+	descriptors := unsafe.Slice(owner.ptr, len(values))
+	stringDescriptors := unsafe.Slice(stringOwner.ptr, len(strings))
+	for i := range values {
+		descriptors[i] = C.GhosttyClipboardContent{
+			mime: stringDescriptors[i*2],
+			data: stringDescriptors[i*2+1],
+		}
+	}
+	return owner, nil
+}
+
+// close releases the descriptor array and all of its referenced strings.
+func (c *cGhosttyClipboardContents) close() {
+	if c == nil {
+		return
+	}
+	Free(c.descriptorPtr, c.descriptorSize)
+	if c.strings != nil {
+		c.strings.close()
+	}
+	c.ptr = nil
+	c.descriptorPtr = nil
+	c.descriptorSize = 0
+	c.strings = nil
 }
 
 //export goDesktopNotificationTrampoline

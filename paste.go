@@ -1,7 +1,7 @@
 package libghostty
 
-// Paste utilities — validate and encode paste data for terminal input.
-// Wraps the C APIs from paste.h.
+// Paste bindings for terminal-aware pasting plus terminal-free validation and
+// encoding. Wraps the C APIs from paste.h.
 
 /*
 #include <ghostty/vt.h>
@@ -9,6 +9,105 @@ package libghostty
 import "C"
 
 import "unsafe"
+
+// PasteSource identifies why paste content is being inserted.
+//
+// C: GhosttyPasteSource
+type PasteSource int
+
+const (
+	// PasteSourceClipboard identifies a user-initiated clipboard paste. When
+	// Kitty paste events are enabled and a clipboard-read callback is
+	// installed, the terminal sends an event instead of writing text directly.
+	PasteSourceClipboard PasteSource = C.GHOSTTY_PASTE_SOURCE_CLIPBOARD
+
+	// PasteSourceText identifies text inserted by another mechanism such as an
+	// IME commit, drag and drop, or scripted input. It is always written as text.
+	PasteSourceText PasteSource = C.GHOSTTY_PASTE_SOURCE_TEXT
+)
+
+// Paste describes content to paste into a terminal. MIMEs lists every
+// available representation in preferred order. Reader is called at most once
+// for the first text representation selected by libghostty and is not called
+// when a Kitty paste event is emitted.
+//
+// C: GhosttyPaste
+type Paste struct {
+	// Location identifies the clipboard that supplied the content.
+	Location ClipboardLocation
+
+	// Source identifies why the paste happened.
+	Source PasteSource
+
+	// MIMEs lists the available representation types in preferred order.
+	MIMEs []string
+
+	// Reader streams a requested representation. It is required when MIMEs is
+	// non-empty.
+	Reader MIMEReaderFn
+
+	// AllowUnsafe permits text that could inject commands. Call Paste with this
+	// false first, confirm with the user on ResultRejected, then retry with it
+	// true.
+	AllowUnsafe bool
+}
+
+// Paste applies the terminal's current paste modes and writes either encoded
+// text or a Kitty clipboard paste event through the terminal's write-pty
+// callback. The returned boolean reports whether anything was written.
+//
+// Text that could inject commands returns an error containing
+// [ResultRejected] without writing anything unless Paste.AllowUnsafe is true.
+// A reader failure returns an error containing both [ResultIOError] and the
+// original Go callback error.
+//
+// C: ghostty_terminal_paste
+func (t *Terminal) Paste(paste Paste) (bool, error) {
+	mimeValues := make([][]byte, len(paste.MIMEs))
+	for i, mime := range paste.MIMEs {
+		mimeValues[i] = []byte(mime)
+	}
+	mimes, err := newCGhosttyStringArray(mimeValues)
+	if err != nil {
+		return false, err
+	}
+	defer mimes.close()
+
+	var reader C.GhosttyMimeReader
+	var bridge *ghosttyMIMEReaderBridge
+	if len(paste.MIMEs) > 0 {
+		bridge, reader, err = newGhosttyMIMEReader(paste.Reader)
+		if err != nil {
+			return false, err
+		}
+		defer bridge.close()
+	}
+
+	request := C.GhosttyPaste{
+		size:         C.size_t(C.sizeof_GhosttyPaste),
+		location:     C.GhosttyClipboardLocation(paste.Location),
+		source:       C.GhosttyPasteSource(paste.Source),
+		mimes:        mimes.ptr,
+		mimes_len:    C.size_t(len(paste.MIMEs)),
+		reader:       reader,
+		allow_unsafe: C.bool(paste.AllowUnsafe),
+	}
+	var written C.bool
+	result := C.ghostty_terminal_paste(t.ptr, &request, &written)
+	if err := resultErrorWithCallback(result, bridgeError(bridge)); err != nil {
+		return false, err
+	}
+	return bool(written), nil
+}
+
+// bridgeError returns the callback error retained by a MIME reader bridge.
+// A nil bridge is valid for an empty MIME list.
+func bridgeError(bridge *ghosttyMIMEReaderBridge) error {
+	if bridge == nil {
+		return nil
+	}
+	return bridge.err
+}
 
 // PasteIsSafe reports whether data is safe to paste into a terminal.
 //

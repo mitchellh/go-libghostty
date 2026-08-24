@@ -32,12 +32,24 @@ func main() {
 		}),
 
 		// clipboard_write: called with normalized, decoded clipboard contents.
-		ghostty.WithClipboardWrite(func(_ *ghostty.Terminal, write ghostty.ClipboardWrite) ghostty.ClipboardWriteResult {
-			fmt.Printf("clipboard_write: location=%d contents=%d\n", write.Location, len(write.Contents))
+		ghostty.WithClipboardWrite(func(_ *ghostty.Terminal, write ghostty.ClipboardWrite) ghostty.ClipboardWriteReply {
+			fmt.Printf("clipboard_write: location=%d name=%q contents=%d\n", write.Location, write.Name, len(write.Contents))
 			for _, content := range write.Contents {
 				fmt.Printf("  %s: %q\n", content.MIME, content.Data)
 			}
-			return ghostty.ClipboardWriteSuccess
+			return ghostty.ClipboardWriteReply{Result: ghostty.ClipboardWriteSuccess}
+		}),
+
+		// clipboard_read: synchronously answers requests from the program.
+		ghostty.WithClipboardRead(func(_ *ghostty.Terminal, read ghostty.ClipboardRead) ghostty.ClipboardReadReply {
+			fmt.Printf("clipboard_read: location=%d mimes=%q\n", read.Location, read.MIMEs)
+			return ghostty.ClipboardReadReply{
+				Result: ghostty.ClipboardReadSuccess,
+				Contents: []ghostty.ClipboardContent{{
+					MIME: "text/plain",
+					Data: []byte("Hello from the clipboard"),
+				}},
+			}
 		}),
 
 		// desktop_notification: called for OSC 9 and OSC 777 requests.
@@ -76,6 +88,9 @@ func main() {
 
 	// OSC 52 (set clipboard) → triggers clipboard_write with decoded data.
 	term.VTWrite([]byte("\x1b]52;c;SGVsbG8gY2xpcGJvYXJk\x1b\\"))
+
+	// OSC 52 (read clipboard) → triggers clipboard_read and writes its reply.
+	term.VTWrite([]byte("\x1b]52;c;?\x1b\\"))
 
 	// OSC 777 (desktop notification) → triggers desktop_notification.
 	term.VTWrite([]byte("\x1b]777;notify;Build;Complete\x1b\\"))

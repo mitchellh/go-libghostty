@@ -92,6 +92,9 @@ const (
 
 	// OSCCommandContextSignal carries a terminal context signal.
 	OSCCommandContextSignal OSCCommandType = C.GHOSTTY_OSC_COMMAND_CONTEXT_SIGNAL
+
+	// OSCCommandKittyDesktopNotification uses Kitty's desktop notification protocol.
+	OSCCommandKittyDesktopNotification OSCCommandType = C.GHOSTTY_OSC_COMMAND_KITTY_DESKTOP_NOTIFICATION
 )
 
 // OSCCommandData identifies typed data extractable from an OSC command.

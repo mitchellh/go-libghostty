@@ -28,6 +28,12 @@ extern _Bool goSysDecodePngTrampoline(
 	size_t data_len,
 	GhosttySysImage* out);
 
+// Forward declaration for the Go secure-random trampoline.
+extern _Bool goSysRandomSecureTrampoline(
+	void* userdata,
+	uint8_t* buf,
+	size_t len);
+
 // Helper to install the Go log trampoline via ghostty_sys_set.
 // We need this because cgo cannot take the address of a Go-exported
 // function directly as a C function pointer.
@@ -53,6 +59,16 @@ static inline GhosttyResult sys_set_decode_png_go(void) {
 // Helper to clear the decode-PNG callback.
 static inline GhosttyResult sys_clear_decode_png(void) {
 	return ghostty_sys_set(GHOSTTY_SYS_OPT_DECODE_PNG, NULL);
+}
+
+// Helper to install the Go secure-random trampoline via ghostty_sys_set.
+static inline GhosttyResult sys_set_random_secure_go(void) {
+	return ghostty_sys_set(GHOSTTY_SYS_OPT_RANDOM_SECURE, (const void*)goSysRandomSecureTrampoline);
+}
+
+// Helper to restore the platform secure-random implementation.
+static inline GhosttyResult sys_clear_random_secure(void) {
+	return ghostty_sys_set(GHOSTTY_SYS_OPT_RANDOM_SECURE, NULL);
 }
 */
 import "C"
@@ -85,6 +101,17 @@ type SysDecodePngFn func(data []byte) (*SysImage, error)
 // sysDecodePngFn is the currently installed Go decode-PNG callback.
 var sysDecodePngFn SysDecodePngFn
 
+// SysRandomSecureFn fills data with cryptographically secure random bytes.
+// Implementations must use a real CSPRNG because libghostty uses this output
+// for secrets such as Kitty clipboard protocol one-time passwords. Return a
+// non-nil error when secure entropy is unavailable.
+//
+// C: GhosttySysRandomSecureFn
+type SysRandomSecureFn func(data []byte) error
+
+// sysRandomSecureFn is the currently installed Go secure-random callback.
+var sysRandomSecureFn SysRandomSecureFn
+
 // SysSetDecodePng installs a Go callback that decodes PNG image data
 // into RGBA pixels. This enables PNG support in the Kitty Graphics
 // Protocol. Pass nil to clear the callback and disable PNG decoding.
@@ -99,6 +126,21 @@ func SysSetDecodePng(fn SysDecodePngFn) error {
 		return resultError(C.sys_clear_decode_png())
 	}
 	return resultError(C.sys_set_decode_png_go())
+}
+
+// SysSetRandomSecure overrides libghostty's platform secure-random source.
+// Pass nil to restore the platform default. Targets without a platform source,
+// such as wasm32-freestanding, require an override for operations that mint
+// secrets.
+//
+// This function is not safe for concurrent use. Configure it at startup before
+// terminals can perform operations that require secure entropy.
+func SysSetRandomSecure(fn SysRandomSecureFn) error {
+	sysRandomSecureFn = fn
+	if fn == nil {
+		return resultError(C.sys_clear_random_secure())
+	}
+	return resultError(C.sys_set_random_secure_go())
 }
 
 // SysLogLevel represents the severity level of a log message from the
@@ -239,4 +281,35 @@ func goSysDecodePngTrampoline(
 	out.data_len = pixelLen
 
 	return true
+}
+
+//export goSysRandomSecureTrampoline
+func goSysRandomSecureTrampoline(
+	_ unsafe.Pointer,
+	buf *C.uint8_t,
+	length C.size_t,
+) (ok C.bool) {
+	fn := sysRandomSecureFn
+	if fn == nil {
+		return C.bool(false)
+	}
+
+	// A panic must never unwind across the C boundary. A failed random source
+	// is represented by false, which makes the originating operation fail with
+	// GHOSTTY_IO_ERROR.
+	defer func() {
+		if recover() != nil {
+			ok = C.bool(false)
+		}
+	}()
+
+	count, valid := ghosttySizeToInt(length)
+	if !valid || (count > 0 && buf == nil) {
+		return C.bool(false)
+	}
+	data := unsafe.Slice((*byte)(unsafe.Pointer(buf)), count)
+	if err := fn(data); err != nil {
+		return C.bool(false)
+	}
+	return C.bool(true)
 }

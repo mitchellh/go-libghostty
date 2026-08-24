@@ -78,7 +78,7 @@ const (
 	KittyGraphicsImageDataCompression KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_COMPRESSION
 
 	// KittyGraphicsImageDataDataPtr is a borrowed pointer to the raw pixel
-	// data (const uint8_t **).
+	// data for the current animation frame (const uint8_t **).
 	KittyGraphicsImageDataDataPtr KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR
 
 	// KittyGraphicsImageDataDataLen is the length of the raw pixel data
@@ -287,7 +287,8 @@ type KittyGraphicsImageInfo struct {
 	// Compression is the compression of the image.
 	Compression KittyImageCompression
 
-	// Generation is the image's process-wide content generation stamp.
+	// Generation is the image's process-wide content generation stamp. It
+	// changes when an animated image advances to another frame.
 	Generation uint64
 
 	// DataLen is the decoded pixel payload length in bytes. For a pending
@@ -542,8 +543,9 @@ func (img *KittyGraphicsImage) Compression() (KittyImageCompression, error) {
 	return KittyImageCompression(v), nil
 }
 
-// Generation returns the process-wide content generation stamp assigned when
-// the image was added or replaced.
+// Generation returns the process-wide content generation stamp. It changes
+// when the image is added or replaced and whenever an animated image advances
+// to another frame.
 func (img *KittyGraphicsImage) Generation() (uint64, error) {
 	var generation C.uint64_t
 	if err := resultError(C.ghostty_kitty_graphics_image_get(
@@ -649,10 +651,11 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 	return info, nil
 }
 
-// Data returns a borrowed slice of the raw pixel data. The slice is only valid
-// until the next mutating terminal call. A pending image returns an error with
-// [ResultNoValue]; use [KittyGraphicsImage.DataLen] to inspect its expected
-// payload length.
+// Data returns a borrowed slice of the raw pixel data for the current animation
+// frame. The slice is only valid until the next mutating terminal call. A
+// pending image returns an error with [ResultNoValue]; use
+// [KittyGraphicsImage.DataLen] to inspect its expected payload length. Use
+// [KittyGraphicsImage.Generation] to invalidate frame caches.
 func (img *KittyGraphicsImage) Data() ([]byte, error) {
 	var ptr *C.uint8_t
 	if err := resultError(C.ghostty_kitty_graphics_image_get(

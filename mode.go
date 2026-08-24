@@ -160,6 +160,9 @@ var (
 
 	// ModeInBandResize enables in-band size reports.
 	ModeInBandResize = Mode(C.GHOSTTY_MODE_IN_BAND_RESIZE)
+
+	// ModePasteEvents enables Kitty clipboard protocol paste events.
+	ModePasteEvents = Mode(C.GHOSTTY_MODE_PASTE_EVENTS)
 )
 
 // ModeReportState represents DECRPM report state values (Ps2 parameter).

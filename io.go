@@ -21,6 +21,11 @@ extern bool goGhosttyWriterTrampoline(
 	uint8_t* data,
 	size_t len);
 
+extern bool goGhosttyMIMEReaderTrampoline(
+	void* userdata,
+	GhosttyString mime,
+	GhosttyWriter writer);
+
 static inline GhosttyReader ghostty_go_reader(uintptr_t userdata) {
 	GhosttyReader reader = {
 		.read = goGhosttyReaderTrampoline,
@@ -38,6 +43,24 @@ static inline GhosttyWriter ghostty_go_writer(uintptr_t userdata) {
 	};
 	return writer;
 }
+
+static inline GhosttyMimeReader ghostty_go_mime_reader(uintptr_t userdata) {
+	GhosttyMimeReader reader = {
+		.read = goGhosttyMIMEReaderTrampoline,
+		.userdata = (void*)userdata,
+	};
+	return reader;
+}
+
+// Invoke a borrowed GhosttyWriter function pointer. Cgo cannot call a C
+// function pointer directly, so MIME reader callbacks route writes through
+// this helper.
+static inline bool ghostty_go_writer_write(
+		GhosttyWriter writer,
+		const uint8_t* data,
+		size_t len) {
+	return writer.write(writer.userdata, data, len);
+}
 */
 import "C"
 
@@ -48,6 +71,75 @@ import (
 	"runtime/cgo"
 	"unsafe"
 )
+
+// MIMEReaderFn streams the requested MIME representation to writer. The MIME
+// string and writer are valid only for the duration of the callback. Return a
+// non-nil error when the representation cannot be read or writer rejects a
+// write.
+//
+// C: GhosttyMimeReaderFn
+type MIMEReaderFn func(mime string, writer io.Writer) error
+
+// ghosttyMIMEReaderBridge owns the cgo handle used by a synchronous
+// GhosttyMimeReader. It also preserves the original Go callback error so the
+// outer operation can expose it through errors.Is and errors.As.
+type ghosttyMIMEReaderBridge struct {
+	reader MIMEReaderFn
+	handle cgo.Handle
+	err    error
+}
+
+// newGhosttyMIMEReader builds a C MIME reader backed by reader. The caller
+// must close the bridge after the synchronous libghostty operation returns.
+func newGhosttyMIMEReader(reader MIMEReaderFn) (*ghosttyMIMEReaderBridge, C.GhosttyMimeReader, error) {
+	if reader == nil {
+		return nil, C.GhosttyMimeReader{}, &Error{Result: ResultInvalidValue}
+	}
+
+	b := &ghosttyMIMEReaderBridge{reader: reader}
+	b.handle = cgo.NewHandle(b)
+	return b, C.ghostty_go_mime_reader(C.uintptr_t(b.handle)), nil
+}
+
+// close releases the MIME reader's cgo handle after C can no longer invoke
+// the callback.
+func (b *ghosttyMIMEReaderBridge) close() {
+	if b == nil || b.handle == 0 {
+		return
+	}
+	b.handle.Delete()
+	b.handle = 0
+	b.reader = nil
+}
+
+// ghosttyMIMEWriter exposes a borrowed GhosttyWriter as an io.Writer for the
+// duration of one MIME reader callback.
+type ghosttyMIMEWriter struct {
+	writer C.GhosttyWriter
+	err    error
+}
+
+// Write passes all of p to the borrowed C writer. GhosttyWriter has an
+// all-or-error contract, so a refusal is reported as a zero-byte write and an
+// error even though the underlying destination may already hold a prefix.
+func (w *ghosttyMIMEWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if w.err != nil {
+		return 0, w.err
+	}
+
+	if !bool(C.ghostty_go_writer_write(
+		w.writer,
+		(*C.uint8_t)(unsafe.Pointer(&p[0])),
+		C.size_t(len(p)),
+	)) {
+		w.err = errors.New("ghostty: MIME writer refused write")
+		return 0, w.err
+	}
+	return len(p), nil
+}
 
 // ghosttyReaderBridge owns the cgo handle installed in a GhosttyReader. The
 // decoder retains that C descriptor, so this bridge must live until the
@@ -145,6 +237,44 @@ func resultErrorWithCallback(result C.GhosttyResult, callbackErr error) error {
 		return err
 	}
 	return errors.Join(err, callbackErr)
+}
+
+//export goGhosttyMIMEReaderTrampoline
+func goGhosttyMIMEReaderTrampoline(
+	userdata unsafe.Pointer,
+	mime C.GhosttyString,
+	writer C.GhosttyWriter,
+) (ok C.bool) {
+	b := cgo.Handle(userdata).Value().(*ghosttyMIMEReaderBridge)
+
+	// A panic must never unwind across the C boundary. Preserve it as the
+	// callback error and make the originating operation return IO_ERROR.
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			b.err = fmt.Errorf("ghostty MIME reader panic: %v", recovered)
+			ok = C.bool(false)
+		}
+	}()
+
+	mimeBytes, valid := copyGhosttyString(mime)
+	if !valid {
+		b.err = &Error{Result: ResultInvalidValue}
+		return C.bool(false)
+	}
+
+	w := &ghosttyMIMEWriter{writer: writer}
+	if err := b.reader(string(mimeBytes), w); err != nil {
+		b.err = err
+		return C.bool(false)
+	}
+	if w.err != nil {
+		// Treat a writer error as fatal even if a callback accidentally ignored
+		// the error returned by io.Writer.Write.
+		b.err = w.err
+		return C.bool(false)
+	}
+
+	return C.bool(true)
 }
 
 //export goGhosttyReaderTrampoline

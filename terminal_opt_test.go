@@ -146,9 +146,9 @@ func TestTerminalWithClipboardWrite(t *testing.T) {
 	var writes []ClipboardWrite
 	term, err := NewTerminal(
 		WithSize(80, 24),
-		WithClipboardWrite(func(_ *Terminal, write ClipboardWrite) ClipboardWriteResult {
+		WithClipboardWrite(func(_ *Terminal, write ClipboardWrite) ClipboardWriteReply {
 			writes = append(writes, write)
-			return ClipboardWriteDenied
+			return ClipboardWriteReply{Result: ClipboardWriteDenied}
 		}),
 	)
 	if err != nil {
@@ -221,12 +221,12 @@ func TestTerminalSetEffectClipboardWrite(t *testing.T) {
 	defer term.Close()
 
 	var writes int
-	term.SetEffectClipboardWrite(func(_ *Terminal, write ClipboardWrite) ClipboardWriteResult {
+	term.SetEffectClipboardWrite(func(_ *Terminal, write ClipboardWrite) ClipboardWriteReply {
 		writes++
 		if write.Location != ClipboardLocationPrimary {
 			t.Errorf("expected primary clipboard, got %d", write.Location)
 		}
-		return ClipboardWriteSuccess
+		return ClipboardWriteReply{Result: ClipboardWriteSuccess}
 	})
 
 	term.VTWrite([]byte("\x1b]52;p;eA==\x1b\\"))
@@ -239,6 +239,129 @@ func TestTerminalSetEffectClipboardWrite(t *testing.T) {
 	term.VTWrite([]byte("\x1b]52;p;eA==\x1b\\"))
 	if writes != 1 {
 		t.Fatalf("expected still 1 clipboard write after clearing, got %d", writes)
+	}
+}
+
+func TestTerminalClipboardWriteKittyReplyAndGrant(t *testing.T) {
+	var output []byte
+	var writes []ClipboardWrite
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithWritePty(func(_ *Terminal, data []byte) {
+			output = append(output, data...)
+		}),
+		WithClipboardWrite(func(_ *Terminal, write ClipboardWrite) ClipboardWriteReply {
+			writes = append(writes, write)
+			return ClipboardWriteReply{
+				Result:   ClipboardWriteSuccess,
+				Remember: true,
+			}
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// A password makes the request rememberable. Replying successfully with
+	// Remember records a grant for the next matching request.
+	term.VTWrite([]byte("\x1b]5522;type=write:id=g1:pw=c2VjcmV0:name=YXBw\x1b\\"))
+	term.VTWrite([]byte("\x1b]5522;type=wdata\x1b\\"))
+	term.VTWrite([]byte("\x1b]5522;type=write:id=g2:pw=c2VjcmV0:name=YXBw\x1b\\"))
+	term.VTWrite([]byte("\x1b]5522;type=wdata\x1b\\"))
+
+	if len(writes) != 2 {
+		t.Fatalf("expected 2 clipboard writes, got %d", len(writes))
+	}
+	if got := writes[0].Name; got != "app" {
+		t.Fatalf("expected program name app, got %q", got)
+	}
+	if writes[0].Granted {
+		t.Fatal("expected first request not to be granted")
+	}
+	if !writes[0].CanRemember {
+		t.Fatal("expected password request to be rememberable")
+	}
+	if !writes[1].Granted {
+		t.Fatal("expected remembered request to be granted")
+	}
+	want := "\x1b]5522;type=write:status=DONE:id=g1\x1b\\" +
+		"\x1b]5522;type=write:status=DONE:id=g2\x1b\\"
+	if got := string(output); got != want {
+		t.Fatalf("expected Kitty write replies %q, got %q", want, got)
+	}
+}
+
+func TestTerminalClipboardReadReplies(t *testing.T) {
+	var output []byte
+	var reads []ClipboardRead
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithWritePty(func(_ *Terminal, data []byte) {
+			output = append(output, data...)
+		}),
+		WithClipboardRead(func(_ *Terminal, read ClipboardRead) ClipboardReadReply {
+			reads = append(reads, read)
+			if read.List {
+				return ClipboardReadReply{
+					Result:    ClipboardReadSuccess,
+					Available: []string{"text/plain", "image/png"},
+				}
+			}
+			return ClipboardReadReply{
+				Result: ClipboardReadSuccess,
+				Contents: []ClipboardContent{{
+					MIME: "text/plain",
+					Data: []byte("hello"),
+				}},
+			}
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// OSC 52 asks for one text representation and preserves the request's BEL
+	// terminator in the encoded reply.
+	term.VTWrite([]byte("\x1b]52;p;?\x07"))
+	if len(reads) != 1 {
+		t.Fatalf("expected 1 clipboard read, got %d", len(reads))
+	}
+	read := reads[0]
+	if read.Location != ClipboardLocationPrimary {
+		t.Fatalf("expected primary clipboard, got %d", read.Location)
+	}
+	if len(read.MIMEs) != 1 || read.MIMEs[0] != "text/plain" {
+		t.Fatalf("expected text/plain request, got %q", read.MIMEs)
+	}
+	if read.List || read.Name != "" || read.Granted || read.CanRemember {
+		t.Fatalf("unexpected OSC 52 metadata: %+v", read)
+	}
+	if want := "\x1b]52;p;aGVsbG8=\x07"; string(output) != want {
+		t.Fatalf("expected OSC 52 reply %q, got %q", want, output)
+	}
+
+	// Kitty's special "." MIME asks for the available-target listing. This
+	// exercises the separate Available array in ClipboardReadReply.
+	output = output[:0]
+	term.VTWrite([]byte("\x1b]5522;type=read:id=list:name=YXBw;Lg==\x1b\\"))
+	if len(reads) != 2 {
+		t.Fatalf("expected 2 clipboard reads, got %d", len(reads))
+	}
+	read = reads[1]
+	if !read.List || len(read.MIMEs) != 0 || read.Name != "app" {
+		t.Fatalf("unexpected Kitty list request: %+v", read)
+	}
+	if !bytes.Contains(output, []byte(";dGV4dC9wbGFpbiBpbWFnZS9wbmcK\x1b\\")) {
+		t.Fatalf("expected encoded MIME listing, got %q", output)
+	}
+
+	term.SetEffectClipboardRead(nil)
+	output = output[:0]
+	term.VTWrite([]byte("\x1b]52;c;?\x1b\\"))
+	if len(reads) != 2 || len(output) != 0 {
+		t.Fatalf("expected cleared callback to ignore OSC 52 read, reads=%d output=%q", len(reads), output)
 	}
 }
 

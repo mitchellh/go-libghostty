@@ -31,6 +31,15 @@ func TestModeVisibilityReport(t *testing.T) {
 	}
 }
 
+func TestModePasteEvents(t *testing.T) {
+	if got := ModePasteEvents.Value(); got != 5522 {
+		t.Fatalf("expected value 5522, got %d", got)
+	}
+	if ModePasteEvents.ANSI() {
+		t.Fatal("expected DEC private mode")
+	}
+}
+
 func TestNewModeAndReportEncode(t *testing.T) {
 	mode := NewMode(25, false)
 	if mode != ModeCursorVisible {

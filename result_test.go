@@ -16,6 +16,7 @@ func TestErrorMessage(t *testing.T) {
 		{ResultNoValue, "ghostty: no value"},
 		{ResultIOError, "ghostty: I/O error"},
 		{ResultLimitExceeded, "ghostty: limit exceeded"},
+		{ResultRejected, "ghostty: rejected"},
 		{Result(9999), "ghostty: result=9999"},
 	}
 

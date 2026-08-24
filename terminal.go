@@ -16,9 +16,9 @@ import (
 // setters, [Terminal.VTWrite], [Terminal.VTWriteUntilGround],
 // [Terminal.Resize], [Terminal.Close],
 // and any borrowed handles derived from it. Effect callbacks run
-// synchronously during VT writes; they must not call [Terminal.VTWrite]
-// or [Terminal.VTWriteUntilGround] on the same terminal and should avoid
-// blocking for long periods.
+// synchronously during terminal operations; they must not reenter the same
+// terminal. Clipboard callbacks may block to mediate user permission because
+// the VT stream waits for their replies.
 // C: GhosttyTerminal
 type Terminal struct {
 	ptr C.GhosttyTerminal
@@ -30,6 +30,7 @@ type Terminal struct {
 	onWritePty            WritePtyFn
 	onBell                BellFn
 	onClipboardWrite      ClipboardWriteFn
+	onClipboardRead       ClipboardReadFn
 	onDesktopNotification DesktopNotificationFn
 	onTitleChanged        TitleChangedFn
 	onPwdChanged          PwdChangedFn
@@ -95,6 +96,7 @@ type TerminalConfig struct {
 	onWritePty            WritePtyFn
 	onBell                BellFn
 	onClipboardWrite      ClipboardWriteFn
+	onClipboardRead       ClipboardReadFn
 	onDesktopNotification DesktopNotificationFn
 	onTitleChanged        TitleChangedFn
 	onPwdChanged          PwdChangedFn
@@ -107,9 +109,10 @@ type TerminalConfig struct {
 	onUnknownSequence     UnknownSequenceFn
 }
 
-// WritePtyFn is called when the terminal writes data back to the pty
-// (e.g. query responses). The first parameter is the terminal that
-// triggered the effect. The data is only valid for the call duration.
+// WritePtyFn is called when the terminal writes data back to the pty, such as
+// query and mode reports, clipboard replies, and terminal paste output. The
+// data is only valid for the call duration and consecutive chunks must be
+// written to the pty in order.
 // C: GhosttyTerminalWritePtyFn
 type WritePtyFn func(t *Terminal, data []byte)
 
@@ -118,9 +121,8 @@ type WritePtyFn func(t *Terminal, data []byte)
 // C: GhosttyTerminalBellFn
 type BellFn func(t *Terminal)
 
-// ClipboardLocation identifies the normalized destination for a clipboard
-// write. Protocol-specific selectors are converted to one of these values
-// before the callback runs.
+// ClipboardLocation identifies a normalized clipboard. Protocol-specific
+// selectors are converted to one of these values before callbacks run.
 // C: GhosttyClipboardLocation
 type ClipboardLocation int
 
@@ -135,10 +137,9 @@ const (
 	ClipboardLocationPrimary ClipboardLocation = C.GHOSTTY_CLIPBOARD_LOCATION_PRIMARY
 )
 
-// ClipboardContent is one MIME representation in a clipboard write. Data is
+// ClipboardContent is one MIME representation of clipboard content. Data is
 // decoded from its protocol-level encoding and is binary-safe. Empty Data is
-// an explicit empty representation; only an empty [ClipboardWrite.Contents]
-// requests that the destination be cleared.
+// an explicit empty representation.
 // C: GhosttyClipboardContent
 type ClipboardContent struct {
 	// MIME is the MIME type of this representation.
@@ -158,11 +159,21 @@ type ClipboardWrite struct {
 
 	// Contents contains all MIME representations of the logical value.
 	Contents []ClipboardContent
+
+	// Name is the writing program's name for permission prompts, or empty when
+	// the protocol does not carry one.
+	Name string
+
+	// Granted reports that a prior session grant already authorizes this
+	// request, so an embedder should skip its permission prompt.
+	Granted bool
+
+	// CanRemember reports that a successful reply may set Remember to record a
+	// session grant for future requests from the same program.
+	CanRemember bool
 }
 
-// ClipboardWriteResult reports the outcome of a clipboard write callback.
-// Protocols without write acknowledgements, including OSC 52 and iTerm2
-// OSC 1337 Copy, ignore this result.
+// ClipboardWriteResult reports the outcome of a clipboard write reply.
 // C: GhosttyClipboardWriteResult
 type ClipboardWriteResult int
 
@@ -186,13 +197,107 @@ const (
 	ClipboardWriteIOError ClipboardWriteResult = C.GHOSTTY_CLIPBOARD_WRITE_RESULT_IO_ERROR
 )
 
+// ClipboardWriteReply answers a clipboard write request. Remember is honored
+// only for a successful result when [ClipboardWrite.CanRemember] is true.
+//
+// C: GhosttyClipboardWriteReply
+type ClipboardWriteReply struct {
+	// Result is the outcome of the write.
+	Result ClipboardWriteResult
+
+	// Remember requests a session grant for matching future requests.
+	Remember bool
+}
+
 // ClipboardWriteFn is called synchronously for a complete logical clipboard
 // write. Protocol details such as selectors, encodings, chunks, and aliases
 // have already been normalized. The write and all of its content are copied
-// into Go-owned memory before the callback runs and may be retained. Return
-// the result of attempting the write.
+// into Go-owned memory before the callback runs and may be retained. The
+// callback may block to mediate permission but must not reenter the terminal.
+// The returned reply is delivered to libghostty before the C callback returns.
 // C: GhosttyTerminalClipboardWriteFn
-type ClipboardWriteFn func(t *Terminal, write ClipboardWrite) ClipboardWriteResult
+type ClipboardWriteFn func(t *Terminal, write ClipboardWrite) ClipboardWriteReply
+
+// ClipboardRead describes a synchronous request from the running program for
+// clipboard content. All strings are copied into Go-owned memory before the
+// callback runs and may be retained.
+//
+// C: GhosttyClipboardRead
+type ClipboardRead struct {
+	// Location identifies the clipboard to read.
+	Location ClipboardLocation
+
+	// MIMEs lists requested representations in preference order.
+	MIMEs []string
+
+	// List reports that the program also requested the list of all available
+	// MIME types.
+	List bool
+
+	// Name is the requesting program's name for permission prompts, or empty
+	// when the protocol does not carry one.
+	Name string
+
+	// Granted reports that a prior session grant already authorizes this
+	// request, so an embedder should skip its permission prompt.
+	Granted bool
+
+	// CanRemember reports that a successful reply may set Remember to record a
+	// session grant for matching future requests.
+	CanRemember bool
+}
+
+// ClipboardReadResult reports the outcome of a clipboard read reply.
+//
+// C: GhosttyClipboardReadResult
+type ClipboardReadResult int
+
+const (
+	// ClipboardReadSuccess means the clipboard was read and the reply carries
+	// its contents.
+	ClipboardReadSuccess ClipboardReadResult = C.GHOSTTY_CLIPBOARD_READ_RESULT_SUCCESS
+
+	// ClipboardReadDenied means policy or the user denied the read.
+	ClipboardReadDenied ClipboardReadResult = C.GHOSTTY_CLIPBOARD_READ_RESULT_DENIED
+
+	// ClipboardReadUnsupported means the embedder cannot read this clipboard.
+	ClipboardReadUnsupported ClipboardReadResult = C.GHOSTTY_CLIPBOARD_READ_RESULT_UNSUPPORTED
+
+	// ClipboardReadBusy means the clipboard is temporarily unavailable.
+	ClipboardReadBusy ClipboardReadResult = C.GHOSTTY_CLIPBOARD_READ_RESULT_BUSY
+
+	// ClipboardReadIOError means reading the clipboard failed due to an I/O
+	// error.
+	ClipboardReadIOError ClipboardReadResult = C.GHOSTTY_CLIPBOARD_READ_RESULT_IO_ERROR
+)
+
+// ClipboardReadReply answers a clipboard read request. On success, Contents
+// should contain each requested representation the clipboard has. Available
+// is used when [ClipboardRead.List] is true. Remember is honored only when
+// [ClipboardRead.CanRemember] is true.
+//
+// C: GhosttyClipboardReadReply
+type ClipboardReadReply struct {
+	// Result is the outcome of the read.
+	Result ClipboardReadResult
+
+	// Contents contains requested representations available on the clipboard.
+	Contents []ClipboardContent
+
+	// Available lists every MIME type available on the clipboard.
+	Available []string
+
+	// Remember requests a session grant for matching future requests.
+	Remember bool
+}
+
+// ClipboardReadFn is called synchronously when the running program requests
+// clipboard content through OSC 52 or OSC 5522. The callback may block to
+// mediate permission but must not reenter the terminal. The returned reply is
+// delivered to libghostty before the C callback returns.
+//
+// C: GhosttyTerminalClipboardReadFn
+type ClipboardReadFn func(t *Terminal, read ClipboardRead) ClipboardReadReply
 
 // TerminalDesktopNotification is a request from the running program to show a
 // desktop notification. Title is empty for protocols such as OSC 9 that
@@ -318,9 +423,9 @@ type EnquiryFn func(t *Terminal) []byte
 // C: GhosttyTerminalXtversionFn
 type XtversionFn func(t *Terminal) string
 
-// SizeFn is called for XTWINOPS size queries (CSI 14/16/18 t).
-// The first parameter is the terminal that triggered the effect.
-// Return the size and true, or zero value and false to ignore the query.
+// SizeFn is called for XTWINOPS size queries (CSI 14/16/18 t) and when VT
+// input enables in-band size reports (mode 2048). Return the size and true,
+// or zero value and false to suppress the report.
 // C: GhosttyTerminalSizeFn
 type SizeFn func(t *Terminal) (SizeReportSize, bool)
 
@@ -439,10 +544,19 @@ func WithBell(fn BellFn) TerminalOption {
 }
 
 // WithClipboardWrite registers an effect handler invoked for normalized,
-// decoded clipboard writes. Clipboard read requests are never forwarded.
+// decoded clipboard writes.
 func WithClipboardWrite(fn ClipboardWriteFn) TerminalOption {
 	return func(c *TerminalConfig) {
 		c.onClipboardWrite = fn
+	}
+}
+
+// WithClipboardRead registers an effect handler invoked when the running
+// program requests clipboard content through OSC 52 or OSC 5522. The handler
+// may block to mediate permission but must return its reply synchronously.
+func WithClipboardRead(fn ClipboardReadFn) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.onClipboardRead = fn
 	}
 }
 
@@ -504,9 +618,9 @@ func WithXtversion(fn XtversionFn) TerminalOption {
 	}
 }
 
-// WithSizeReport registers an effect handler invoked for XTWINOPS
-// size queries (CSI 14/16/18 t). Return the size and true, or
-// zero value and false to silently ignore the query.
+// WithSizeReport registers an effect handler invoked for XTWINOPS size queries
+// and when VT input enables in-band size reports. Return the size and true, or
+// zero value and false to suppress the report.
 func WithSizeReport(fn SizeFn) TerminalOption {
 	return func(c *TerminalConfig) {
 		c.onSize = fn
@@ -633,6 +747,7 @@ func terminalFromC(cterm C.GhosttyTerminal, cfg TerminalConfig) *Terminal {
 		onWritePty:            cfg.onWritePty,
 		onBell:                cfg.onBell,
 		onClipboardWrite:      cfg.onClipboardWrite,
+		onClipboardRead:       cfg.onClipboardRead,
 		onDesktopNotification: cfg.onDesktopNotification,
 		onTitleChanged:        cfg.onTitleChanged,
 		onPwdChanged:          cfg.onPwdChanged,

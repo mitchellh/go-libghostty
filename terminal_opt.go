@@ -31,6 +31,14 @@ func (t *Terminal) SetEffectClipboardWrite(fn ClipboardWriteFn) {
 	t.syncEffects()
 }
 
+// SetEffectClipboardRead registers (or clears) the clipboard-read effect on a
+// live terminal. The handler may block to mediate permission but must return
+// its reply synchronously. Pass nil to clear.
+func (t *Terminal) SetEffectClipboardRead(fn ClipboardReadFn) {
+	t.onClipboardRead = fn
+	t.syncEffects()
+}
+
 // SetEffectDesktopNotification registers (or clears) the desktop-notification
 // effect on a live terminal. Pass nil to clear.
 func (t *Terminal) SetEffectDesktopNotification(fn DesktopNotificationFn) {
@@ -73,8 +81,9 @@ func (t *Terminal) SetEffectXtversion(fn XtversionFn) {
 	t.syncEffects()
 }
 
-// SetEffectSize registers (or clears) the size-report effect on a
-// live terminal. Pass nil to clear.
+// SetEffectSize registers (or clears) the size-report effect for XTWINOPS
+// queries and in-band resize mode reports on a live terminal. Pass nil to
+// clear.
 func (t *Terminal) SetEffectSize(fn SizeFn) {
 	t.onSize = fn
 	t.syncEffects()

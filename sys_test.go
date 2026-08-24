@@ -77,3 +77,27 @@ func TestSysSetDecodePngCallback(t *testing.T) {
 		t.Fatalf("SysSetDecodePng(nil) = %v, want nil", err)
 	}
 }
+
+func TestSysSetRandomSecureNil(t *testing.T) {
+	// Clearing with nil restores the platform default.
+	if err := SysSetRandomSecure(nil); err != nil {
+		t.Fatalf("SysSetRandomSecure(nil) = %v, want nil", err)
+	}
+}
+
+func TestSysSetRandomSecureCallback(t *testing.T) {
+	if err := SysSetRandomSecure(func(data []byte) error {
+		for i := range data {
+			data[i] = byte(i)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("SysSetRandomSecure(fn) = %v, want nil", err)
+	}
+
+	// Restore the platform source so this process-global option cannot affect
+	// later tests.
+	if err := SysSetRandomSecure(nil); err != nil {
+		t.Fatalf("SysSetRandomSecure(nil) = %v, want nil", err)
+	}
+}

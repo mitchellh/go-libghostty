@@ -33,6 +33,11 @@ const (
 
 	// ResultLimitExceeded indicates that encoded input exceeded a configured limit.
 	ResultLimitExceeded Result = C.GHOSTTY_LIMIT_EXCEEDED
+
+	// ResultRejected indicates that an operation was rejected by a safety check.
+	// The caller may confirm with the user and retry with the operation's allow
+	// flag set.
+	ResultRejected Result = C.GHOSTTY_REJECTED
 )
 
 // Error holds a non-success Ghostty result.
@@ -54,6 +59,8 @@ func (e *Error) Error() string {
 		return "ghostty: I/O error"
 	case ResultLimitExceeded:
 		return "ghostty: limit exceeded"
+	case ResultRejected:
+		return "ghostty: rejected"
 	default:
 		return fmt.Sprintf("ghostty: result=%d", int(e.Result))
 	}
