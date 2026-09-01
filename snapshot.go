@@ -2,6 +2,7 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
+#include "go_io.h"
 
 // Returning small result structs by value keeps cgo from forcing every C out
 // parameter onto the Go heap. These are binding-only adapters; the underlying
@@ -56,13 +57,24 @@ typedef struct {
 } ghostty_go_snapshot_decoder_result;
 
 static inline ghostty_go_snapshot_decoder_result
-ghostty_go_snapshot_decoder_new(GhosttyReader reader) {
+ghostty_go_snapshot_decoder_new(uintptr_t userdata) {
 	ghostty_go_snapshot_decoder_result out = {
 		.result = GHOSTTY_SUCCESS,
 		.decoder = NULL,
 	};
+	GhosttyReader reader = {
+		.read = ghostty_go_reader_trampoline,
+		.userdata = (void*)userdata,
+	};
 	out.result = ghostty_snapshot_decoder_new(NULL, &out.decoder, reader);
 	return out;
+}
+
+static inline GhosttyResult ghostty_go_snapshot_encode(
+	GhosttyTerminal terminal,
+	uintptr_t userdata
+) {
+	return ghostty_snapshot_encode(terminal, ghostty_go_writer(userdata));
 }
 
 static inline ghostty_go_snapshot_decoder_result
@@ -110,6 +122,7 @@ import (
 	"errors"
 	"io"
 	"runtime"
+	"runtime/cgo"
 	"unsafe"
 )
 
@@ -258,13 +271,13 @@ func (t *Terminal) SnapshotBuf(buf []byte) (int, error) {
 // count includes bytes accepted before an error.
 // C: ghostty_snapshot_encode
 func (t *Terminal) SnapshotWriteTo(w io.Writer) (int64, error) {
-	bridge, writer, err := newGhosttyWriter(w)
+	bridge, err := newGhosttyWriter(w)
 	if err != nil {
 		return 0, err
 	}
 	defer bridge.close()
 
-	result := C.ghostty_snapshot_encode(t.ptr, writer)
+	result := C.ghostty_go_snapshot_encode(t.ptr, C.uintptr_t(bridge.handle))
 	return bridge.written, resultErrorWithCallback(result, bridge.err)
 }
 
@@ -273,13 +286,14 @@ func (t *Terminal) SnapshotWriteTo(w io.Writer) (int64, error) {
 // zero-byte read is permanent EOF; nonblocking readers must wait internally.
 // C: ghostty_snapshot_decoder_new
 func NewSnapshotDecoder(r io.Reader) (*SnapshotDecoder, error) {
-	holder := &snapshotReaderDecoder{}
-	reader, err := holder.reader.init(r)
-	if err != nil {
-		return nil, err
+	if r == nil {
+		return nil, &Error{Result: ResultInvalidValue}
 	}
+	holder := &snapshotReaderDecoder{}
+	holder.reader.reader = r
+	holder.reader.handle = cgo.NewHandle(&holder.reader)
 
-	result := C.ghostty_go_snapshot_decoder_new(reader)
+	result := C.ghostty_go_snapshot_decoder_new(C.uintptr_t(holder.reader.handle))
 	if err := resultError(result.result); err != nil {
 		holder.reader.close()
 		return nil, err

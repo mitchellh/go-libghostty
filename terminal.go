@@ -1073,13 +1073,3 @@ func (t *Terminal) PointFromGridRef(ref *GridRef, tag PointTag) (Point, error) {
 	}
 	return pointFromC(tag, coord), nil
 }
-
-// handleToPointer converts a cgo.Handle (uintptr) to unsafe.Pointer
-// for passing as C userdata. The handle is an opaque integer, not a
-// real Go pointer, so we suppress checkptr which would otherwise
-// reject it under -race.
-//
-//go:nocheckptr
-func handleToPointer(h cgo.Handle) unsafe.Pointer {
-	return unsafe.Pointer(h)
-}

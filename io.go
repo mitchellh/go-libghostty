@@ -7,50 +7,7 @@ package libghostty
 // without storing a Go pointer in C memory.
 
 /*
-#include <ghostty/vt.h>
-#include <stdint.h>
-
-extern bool goGhosttyReaderTrampoline(
-	void* userdata,
-	uint8_t* buffer,
-	size_t capacity,
-	size_t* out_read);
-
-extern bool goGhosttyWriterTrampoline(
-	void* userdata,
-	uint8_t* data,
-	size_t len);
-
-extern bool goGhosttyMIMEReaderTrampoline(
-	void* userdata,
-	GhosttyString mime,
-	GhosttyWriter writer);
-
-static inline GhosttyReader ghostty_go_reader(uintptr_t userdata) {
-	GhosttyReader reader = {
-		.read = goGhosttyReaderTrampoline,
-		.userdata = (void*)userdata,
-	};
-	return reader;
-}
-
-static inline GhosttyWriter ghostty_go_writer(uintptr_t userdata) {
-	GhosttyWriter writer = {
-		// cgo cannot export a const-qualified pointer parameter. The Go
-		// trampoline treats data as read-only, so this cast is ABI-safe.
-		.write = (GhosttyWriterFn)goGhosttyWriterTrampoline,
-		.userdata = (void*)userdata,
-	};
-	return writer;
-}
-
-static inline GhosttyMimeReader ghostty_go_mime_reader(uintptr_t userdata) {
-	GhosttyMimeReader reader = {
-		.read = goGhosttyMIMEReaderTrampoline,
-		.userdata = (void*)userdata,
-	};
-	return reader;
-}
+#include "go_io.h"
 
 // Invoke a borrowed GhosttyWriter function pointer. Cgo cannot call a C
 // function pointer directly, so MIME reader callbacks route writes through
@@ -87,18 +44,6 @@ type ghosttyMIMEReaderBridge struct {
 	reader MIMEReaderFn
 	handle cgo.Handle
 	err    error
-}
-
-// newGhosttyMIMEReader builds a C MIME reader backed by reader. The caller
-// must close the bridge after the synchronous libghostty operation returns.
-func newGhosttyMIMEReader(reader MIMEReaderFn) (*ghosttyMIMEReaderBridge, C.GhosttyMimeReader, error) {
-	if reader == nil {
-		return nil, C.GhosttyMimeReader{}, &Error{Result: ResultInvalidValue}
-	}
-
-	b := &ghosttyMIMEReaderBridge{reader: reader}
-	b.handle = cgo.NewHandle(b)
-	return b, C.ghostty_go_mime_reader(C.uintptr_t(b.handle)), nil
 }
 
 // close releases the MIME reader's cgo handle after C can no longer invoke
@@ -152,18 +97,6 @@ type ghosttyReaderBridge struct {
 	eof        bool
 }
 
-// init initializes b to read from r and returns its C descriptor. The caller
-// must close b after the descriptor is no longer in use.
-func (b *ghosttyReaderBridge) init(r io.Reader) (C.GhosttyReader, error) {
-	if r == nil {
-		return C.GhosttyReader{}, &Error{Result: ResultInvalidValue}
-	}
-
-	b.reader = r
-	b.handle = cgo.NewHandle(b)
-	return C.ghostty_go_reader(C.uintptr_t(b.handle)), nil
-}
-
 // close releases the reader's cgo handle. It must be called only after C can
 // no longer invoke the callback.
 func (b *ghosttyReaderBridge) close() {
@@ -178,29 +111,28 @@ func (b *ghosttyReaderBridge) close() {
 // ghosttyWriterBridge adapts an io.Writer to GhosttyWriter. It records the
 // accepted byte count and the original Go error, if any.
 type ghosttyWriterBridge struct {
-	writer     io.Writer
-	handle     cgo.Handle
-	descriptor C.GhosttyWriter
-	written    int64
-	err        error
+	writer  io.Writer
+	handle  cgo.Handle
+	written int64
+	err     error
 }
 
-// newGhosttyWriter builds a C writer backed by w. The caller must close the
-// bridge after the synchronous libghostty operation returns.
-func newGhosttyWriter(w io.Writer) (*ghosttyWriterBridge, C.GhosttyWriter, error) {
+// newGhosttyWriter builds a writer bridge backed by w. The caller passes the
+// bridge handle to a C helper that constructs the native descriptor, and must
+// close the bridge after the synchronous libghostty operation returns.
+func newGhosttyWriter(w io.Writer) (*ghosttyWriterBridge, error) {
 	b := &ghosttyWriterBridge{}
-	descriptor, err := b.reset(w)
-	if err != nil {
-		return nil, C.GhosttyWriter{}, err
+	if err := b.reset(w); err != nil {
+		return nil, err
 	}
-	return b, descriptor, nil
+	return b, nil
 }
 
-// reset prepares b to write to w. It reuses the existing handle and descriptor
-// when possible. Calls using the same bridge must be serialized.
-func (b *ghosttyWriterBridge) reset(w io.Writer) (C.GhosttyWriter, error) {
+// reset prepares b to write to w. It reuses the existing integer handle when
+// possible. Calls using the same bridge must be serialized.
+func (b *ghosttyWriterBridge) reset(w io.Writer) error {
 	if w == nil {
-		return C.GhosttyWriter{}, &Error{Result: ResultInvalidValue}
+		return &Error{Result: ResultInvalidValue}
 	}
 
 	b.writer = w
@@ -208,14 +140,8 @@ func (b *ghosttyWriterBridge) reset(w io.Writer) (C.GhosttyWriter, error) {
 	b.err = nil
 	if b.handle == 0 {
 		b.handle = cgo.NewHandle(b)
-		b.descriptor = C.ghostty_go_writer(C.uintptr_t(b.handle))
 	}
-	return b.descriptor, nil
-}
-
-// finish releases w but retains the C descriptor for reuse.
-func (b *ghosttyWriterBridge) finish() {
-	b.writer = nil
+	return nil
 }
 
 // close releases the writer's cgo handle.
@@ -225,7 +151,6 @@ func (b *ghosttyWriterBridge) close() {
 	}
 	b.handle.Delete()
 	b.handle = 0
-	b.descriptor = C.GhosttyWriter{}
 	b.writer = nil
 }
 
@@ -241,7 +166,7 @@ func resultErrorWithCallback(result C.GhosttyResult, callbackErr error) error {
 
 //export goGhosttyMIMEReaderTrampoline
 func goGhosttyMIMEReaderTrampoline(
-	userdata unsafe.Pointer,
+	userdata C.uintptr_t,
 	mime C.GhosttyString,
 	writer C.GhosttyWriter,
 ) (ok C.bool) {
@@ -279,7 +204,7 @@ func goGhosttyMIMEReaderTrampoline(
 
 //export goGhosttyReaderTrampoline
 func goGhosttyReaderTrampoline(
-	userdata unsafe.Pointer,
+	userdata C.uintptr_t,
 	buffer *C.uint8_t,
 	capacity C.size_t,
 	outRead *C.size_t,
@@ -342,7 +267,7 @@ func goGhosttyReaderTrampoline(
 
 //export goGhosttyWriterTrampoline
 func goGhosttyWriterTrampoline(
-	userdata unsafe.Pointer,
+	userdata C.uintptr_t,
 	data *C.uint8_t,
 	length C.size_t,
 ) (ok C.bool) {

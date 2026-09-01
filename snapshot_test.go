@@ -33,6 +33,33 @@ func (r errorReader) Read([]byte) (int, error) {
 	return 0, r.err
 }
 
+// snapshotStackBuffer forces the Go stack to grow during both native reader
+// and writer callbacks. This guards against representing a cgo.Handle integer
+// as unsafe.Pointer in a live Go frame, which makes the stack copier abort.
+type snapshotStackBuffer struct {
+	bytes.Buffer
+}
+
+func (b *snapshotStackBuffer) Write(p []byte) (int, error) {
+	growSnapshotCallbackStack(16)
+	return b.Buffer.Write(p)
+}
+
+func (b *snapshotStackBuffer) Read(p []byte) (int, error) {
+	growSnapshotCallbackStack(16)
+	return b.Buffer.Read(p)
+}
+
+//go:noinline
+func growSnapshotCallbackStack(depth int) byte {
+	var padding [1024]byte
+	padding[depth%len(padding)] = byte(depth)
+	if depth == 0 {
+		return padding[0]
+	}
+	return growSnapshotCallbackStack(depth-1) + padding[depth%len(padding)]
+}
+
 func newSnapshotTerminal(t *testing.T) *Terminal {
 	t.Helper()
 
@@ -168,6 +195,27 @@ func TestSnapshotEncodeFormsAndDecode(t *testing.T) {
 	if !strings.Contains(formatted, "hello red") {
 		t.Fatalf("expected restored and resumed content, got %q", formatted)
 	}
+}
+
+func TestSnapshotIOCallbacksCanGrowStack(t *testing.T) {
+	term := newSnapshotTerminal(t)
+	defer term.Close()
+
+	var encoded snapshotStackBuffer
+	if _, err := term.SnapshotWriteTo(&encoded); err != nil {
+		t.Fatal(err)
+	}
+
+	decoder, err := NewSnapshotDecoder(&encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoder.Close()
+	decoded, err := decoder.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoded.Close()
 }
 
 func TestSnapshotDecodeRetainsContinuation(t *testing.T) {

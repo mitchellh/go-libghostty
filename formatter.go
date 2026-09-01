@@ -2,6 +2,7 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
+#include "go_io.h"
 #include <string.h>
 
 // Helper to create a properly initialized GhosttyFormatterTerminalOptions (sized struct).
@@ -69,11 +70,11 @@ static bool ghostty_go_formatter_writer_write(
 
 static inline GhosttyResult ghostty_go_formatter_format(
 	GhosttyFormatter formatter,
-	GhosttyWriter downstream
+	uintptr_t userdata
 ) {
 	uint8_t buffer[16 * 1024];
 	ghostty_go_formatter_writer context = {
-		.downstream = downstream,
+		.downstream = ghostty_go_writer(userdata),
 		.buffer = buffer,
 		.len = 0,
 		.capacity = sizeof(buffer),
@@ -385,14 +386,13 @@ func (f *Formatter) FormatString() (string, error) {
 // C: ghostty_formatter_format
 func (f *Formatter) WriteTo(w io.Writer) (int64, error) {
 	bridge := &f.writer
-	writer, err := bridge.reset(w)
-	if err != nil {
+	if err := bridge.reset(w); err != nil {
 		return 0, err
 	}
 
-	result := C.ghostty_go_formatter_format(f.ptr, writer)
+	result := C.ghostty_go_formatter_format(f.ptr, C.uintptr_t(bridge.handle))
 	written := bridge.written
 	callbackErr := bridge.err
-	bridge.finish()
+	bridge.writer = nil
 	return written, resultErrorWithCallback(result, callbackErr)
 }

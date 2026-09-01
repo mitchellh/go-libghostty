@@ -5,10 +5,30 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
+#include "go_io.h"
+
+static inline GhosttyResult ghostty_go_terminal_paste(
+	GhosttyTerminal terminal,
+	const GhosttyPaste* request,
+	uintptr_t userdata,
+	bool* out_written
+) {
+	GhosttyPaste copy = *request;
+	if (userdata != 0) {
+		copy.reader = (GhosttyMimeReader){
+			.read = ghostty_go_mime_reader_trampoline,
+			.userdata = (void*)userdata,
+		};
+	}
+	return ghostty_terminal_paste(terminal, &copy, out_written);
+}
 */
 import "C"
 
-import "unsafe"
+import (
+	"runtime/cgo"
+	"unsafe"
+)
 
 // PasteSource identifies why paste content is being inserted.
 //
@@ -73,13 +93,13 @@ func (t *Terminal) Paste(paste Paste) (bool, error) {
 	}
 	defer mimes.close()
 
-	var reader C.GhosttyMimeReader
-	var bridge *ghosttyMIMEReaderBridge
+	bridge := &ghosttyMIMEReaderBridge{}
 	if len(paste.MIMEs) > 0 {
-		bridge, reader, err = newGhosttyMIMEReader(paste.Reader)
-		if err != nil {
-			return false, err
+		if paste.Reader == nil {
+			return false, &Error{Result: ResultInvalidValue}
 		}
+		bridge.reader = paste.Reader
+		bridge.handle = cgo.NewHandle(bridge)
 		defer bridge.close()
 	}
 
@@ -89,24 +109,18 @@ func (t *Terminal) Paste(paste Paste) (bool, error) {
 		source:       C.GhosttyPasteSource(paste.Source),
 		mimes:        mimes.ptr,
 		mimes_len:    C.size_t(len(paste.MIMEs)),
-		reader:       reader,
 		allow_unsafe: C.bool(paste.AllowUnsafe),
 	}
+	var userdata C.uintptr_t
+	if bridge.handle != 0 {
+		userdata = C.uintptr_t(bridge.handle)
+	}
 	var written C.bool
-	result := C.ghostty_terminal_paste(t.ptr, &request, &written)
-	if err := resultErrorWithCallback(result, bridgeError(bridge)); err != nil {
+	result := C.ghostty_go_terminal_paste(t.ptr, &request, userdata, &written)
+	if err := resultErrorWithCallback(result, bridge.err); err != nil {
 		return false, err
 	}
 	return bool(written), nil
-}
-
-// bridgeError returns the callback error retained by a MIME reader bridge.
-// A nil bridge is valid for an empty MIME list.
-func bridgeError(bridge *ghosttyMIMEReaderBridge) error {
-	if bridge == nil {
-		return nil
-	}
-	return bridge.err
 }
 
 // PasteIsSafe reports whether data is safe to paste into a terminal.

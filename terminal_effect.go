@@ -9,6 +9,7 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
+#include <stdint.h>
 
 // Forward declarations for the Go trampolines so we can take their
 // addresses on the C side.
@@ -73,6 +74,16 @@ static inline GhosttyResult set_unknown_sequence(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE, (const void*)goUnknownSequenceTrampoline);
 }
 
+// Convert the integer cgo.Handle to native userdata only after control enters
+// C. A handle is not a valid pointer and must never occupy an unsafe.Pointer
+// slot in a Go stack frame.
+static inline GhosttyResult set_userdata(GhosttyTerminal t, uintptr_t userdata) {
+	return ghostty_terminal_set(
+		t,
+		GHOSTTY_TERMINAL_OPT_USERDATA,
+		(const void*)userdata);
+}
+
 // Return the APC member of the tagged union without making Go depend on
 // cgo's platform-specific representation of C unions.
 static inline const GhosttyTerminalUnknownStringSequence* unknown_sequence_apc(
@@ -112,11 +123,7 @@ func (t *Terminal) syncEffects() {
 	// callbacks do not need a handle.
 	if t.handle == 0 && t.hasEffects() {
 		t.handle = cgo.NewHandle(t)
-		C.ghostty_terminal_set(
-			t.ptr,
-			C.GHOSTTY_TERMINAL_OPT_USERDATA,
-			handleToPointer(t.handle),
-		)
+		C.set_userdata(t.ptr, C.uintptr_t(t.handle))
 	}
 
 	if t.onWritePty != nil {

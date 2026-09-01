@@ -2,6 +2,16 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
+#include "go_io.h"
+
+static inline GhosttyResult ghostty_go_terminal_continuation_write(
+	GhosttyTerminal terminal,
+	uintptr_t userdata
+) {
+	return ghostty_terminal_continuation_write(
+		terminal,
+		ghostty_go_writer(userdata));
+}
 */
 import "C"
 
@@ -73,12 +83,15 @@ func (t *Terminal) ContinuationBuf(buf []byte) (int, error) {
 // returned count includes bytes accepted before an error.
 // C: ghostty_terminal_continuation_write
 func (t *Terminal) ContinuationWriteTo(w io.Writer) (int64, error) {
-	bridge, writer, err := newGhosttyWriter(w)
+	bridge, err := newGhosttyWriter(w)
 	if err != nil {
 		return 0, err
 	}
 	defer bridge.close()
 
-	result := C.ghostty_terminal_continuation_write(t.ptr, writer)
+	result := C.ghostty_go_terminal_continuation_write(
+		t.ptr,
+		C.uintptr_t(bridge.handle),
+	)
 	return bridge.written, resultErrorWithCallback(result, bridge.err)
 }
