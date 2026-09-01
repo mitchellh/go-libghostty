@@ -172,6 +172,10 @@ const (
 	// TerminalDataCursorAtPrompt indicates whether the cursor is currently at
 	// a semantic shell prompt or input area (bool).
 	TerminalDataCursorAtPrompt TerminalData = C.GHOSTTY_TERMINAL_DATA_CURSOR_AT_PROMPT
+
+	// TerminalDataKittyClipboardWriteMaxBytes is the configured maximum number
+	// of decoded bytes in a single Kitty clipboard protocol write (size_t).
+	TerminalDataKittyClipboardWriteMaxBytes TerminalData = C.GHOSTTY_TERMINAL_DATA_CLIPBOARD_WRITE_MAX_BYTES
 )
 
 // ActiveScreen returns which screen buffer is currently active.
@@ -363,6 +367,21 @@ func (t *Terminal) HeightPx() (uint32, error) {
 		return 0, err
 	}
 	return uint32(v), nil
+}
+
+// KittyClipboardWriteMaxBytes returns the maximum number of decoded bytes in a
+// single Kitty clipboard protocol write. The limit applies to OSC 5522 and not
+// OSC 52.
+func (t *Terminal) KittyClipboardWriteMaxBytes() (uint, error) {
+	var limit C.size_t
+	if err := resultError(C.ghostty_terminal_get(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_DATA_CLIPBOARD_WRITE_MAX_BYTES,
+		unsafe.Pointer(&limit),
+	)); err != nil {
+		return 0, err
+	}
+	return uint(limit), nil
 }
 
 // KittyKeyboardFlags returns the current Kitty keyboard protocol flags.

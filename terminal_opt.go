@@ -287,6 +287,26 @@ func (t *Terminal) SetSelection(sel *Selection) error {
 	))
 }
 
+// SetKittyClipboardWriteMaxBytes sets the maximum number of decoded bytes in
+// new Kitty clipboard protocol writes. A write that is already in progress
+// keeps the limit that was active when it started. This setting applies to OSC
+// 5522 and does not affect OSC 52.
+//
+// Pass nil to restore the default limit of 64 MiB. Pass a pointer to the
+// maximum uint value to remove the limit.
+func (t *Terminal) SetKittyClipboardWriteMaxBytes(limit *uint) error {
+	var cValue unsafe.Pointer
+	if limit != nil {
+		cLimit := C.size_t(*limit)
+		cValue = unsafe.Pointer(&cLimit)
+	}
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE_MAX_BYTES,
+		cValue,
+	))
+}
+
 // SetKittyImageStorageLimit sets the Kitty image storage limit in bytes.
 // Applied to all initialized screens (primary and alternate). A value of
 // zero disables the Kitty graphics protocol entirely, deleting all stored

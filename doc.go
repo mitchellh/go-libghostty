@@ -28,11 +28,14 @@
 // view confined to one goroutine at a time or protect it with your own
 // synchronization.
 //
-// [RenderState] is the main exception. Hold exclusive access to the
-// terminal while calling [RenderState.Update]. After Update returns, the
-// render state can be read without touching the terminal until the next
-// Update. Do not call Update concurrently with reads from the same
-// render state.
+// [RenderState] and [Search] support limited concurrent use. Their type
+// documentation identifies which calls may run while another goroutine uses
+// the terminal.
+//
+// Hold exclusive access to the terminal while calling [RenderState.Update].
+// After Update returns, the render state can be read without touching the
+// terminal until the next Update. Do not call Update concurrently with reads
+// from the same render state.
 //
 // Borrowed views such as [GridRef], [KittyGraphics], [KittyGraphicsImage],
 // and [Selection], plus raw pixel slices returned by Kitty graphics

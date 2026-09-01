@@ -94,6 +94,37 @@ func TestTerminalSetAPCMaxBytes(t *testing.T) {
 	}
 }
 
+func TestTerminalKittyClipboardWriteMaxBytes(t *testing.T) {
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithKittyClipboardWriteMaxBytes(4),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	limit, err := term.KittyClipboardWriteMaxBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limit != 4 {
+		t.Fatalf("expected constructor limit 4, got %d", limit)
+	}
+
+	if err := term.SetKittyClipboardWriteMaxBytes(nil); err != nil {
+		t.Fatal(err)
+	}
+	limit, err = term.KittyClipboardWriteMaxBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const defaultLimit = 64 * 1024 * 1024
+	if limit != defaultLimit {
+		t.Fatalf("expected default limit %d, got %d", defaultLimit, limit)
+	}
+}
+
 func TestTerminalWithBell(t *testing.T) {
 	var bellCount int
 	term, err := NewTerminal(WithSize(80, 24), WithBell(func(_ *Terminal) {

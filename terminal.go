@@ -76,6 +76,11 @@ type TerminalConfig struct {
 	// disabled; zero also explicitly disables tracking.
 	ContinuationMaxBytes *uint
 
+	// KittyClipboardWriteMaxBytes is the maximum number of decoded bytes in a
+	// single Kitty clipboard protocol write. Nil retains libghostty's default
+	// limit of 64 MiB. The maximum uint value removes the limit.
+	KittyClipboardWriteMaxBytes *uint
+
 	// TitleReport optionally enables replies to CSI 21 t title queries. Nil
 	// retains the secure disabled default.
 	TitleReport *bool
@@ -239,7 +244,10 @@ type ClipboardRead struct {
 	Name string
 
 	// Granted reports that a prior session grant already authorizes this
-	// request, so an embedder should skip its permission prompt.
+	// request, so an application should skip its permission prompt. Granted is
+	// always false when MIMEs is empty. A request with List set and no MIMEs
+	// only asks which MIME types are available and should be served without
+	// prompting.
 	Granted bool
 
 	// CanRemember reports that a successful reply may set Remember to record a
@@ -488,6 +496,16 @@ func WithContinuationMaxBytes(limit uint) TerminalOption {
 	}
 }
 
+// WithKittyClipboardWriteMaxBytes sets the maximum number of decoded bytes in
+// a single Kitty clipboard protocol write. This option applies to OSC 5522 and
+// does not affect OSC 52. The default limit is 64 MiB. The maximum uint value
+// removes the limit.
+func WithKittyClipboardWriteMaxBytes(limit uint) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.KittyClipboardWriteMaxBytes = &limit
+	}
+}
+
 // WithTitleReport enables or disables replies to CSI 21 t window-title
 // queries. Reporting is disabled by default because a program can otherwise
 // query a title it previously set and inject that text into the pty stream.
@@ -707,6 +725,12 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 	// exposed for live terminals. The terminal is already wrapped so failures
 	// can use the normal Close path to release both the C terminal and userdata
 	// handle.
+	if cfg.KittyClipboardWriteMaxBytes != nil {
+		if err := t.SetKittyClipboardWriteMaxBytes(cfg.KittyClipboardWriteMaxBytes); err != nil {
+			t.Close()
+			return nil, err
+		}
+	}
 	if cfg.TitleReport != nil {
 		if err := t.SetTitleReport(*cfg.TitleReport); err != nil {
 			t.Close()
