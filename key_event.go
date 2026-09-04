@@ -304,9 +304,14 @@ func NewKeyEvent() (*KeyEvent, error) {
 }
 
 // Close frees the underlying key event handle. After this call, the
-// key event must not be used.
+// key event must not be used, except that calling Close again is a safe
+// no-op.
 func (e *KeyEvent) Close() {
+	if e == nil || e.ptr == nil {
+		return
+	}
 	C.ghostty_key_event_free(e.ptr)
+	e.ptr = nil
 }
 
 // SetAction sets the key action (press, release, repeat).

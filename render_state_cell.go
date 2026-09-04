@@ -247,9 +247,14 @@ func NewRenderStateRowCells() (*RenderStateRowCells, error) {
 }
 
 // Close frees the underlying row cells handle. After this call,
-// the instance must not be used.
+// the instance must not be used, except that calling Close again is a
+// safe no-op.
 func (rc *RenderStateRowCells) Close() {
+	if rc == nil || rc.ptr == nil {
+		return
+	}
 	C.ghostty_render_state_row_cells_free(rc.ptr)
+	rc.ptr = nil
 }
 
 // Next advances the iterator to the next cell. Returns true if the

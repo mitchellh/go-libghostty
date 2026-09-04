@@ -161,9 +161,13 @@ func NewSGRParser() (*SGRParser, error) {
 	return &SGRParser{ptr: ptr}, nil
 }
 
-// Close frees the parser.
+// Close frees the parser. Calling Close again is a safe no-op.
 func (p *SGRParser) Close() {
+	if p == nil || p.ptr == nil {
+		return
+	}
 	C.ghostty_sgr_free(p.ptr)
+	p.ptr = nil
 }
 
 // Reset restarts iteration at the beginning of the current parameter list.

@@ -323,10 +323,14 @@ func NewFormatter(t *Terminal, opts ...FormatterOption) (*Formatter, error) {
 }
 
 // Close frees the formatter handle. After this call, the formatter
-// must not be used.
+// must not be used, except that calling Close again is a safe no-op.
 func (f *Formatter) Close() {
+	if f == nil || f.ptr == nil {
+		return
+	}
 	f.writer.close()
 	C.ghostty_formatter_free(f.ptr)
+	f.ptr = nil
 }
 
 // Format runs the formatter and returns the output as a byte slice.

@@ -576,9 +576,13 @@ func NewSelectionGestureEvent(eventType SelectionGestureEventType) (*SelectionGe
 }
 
 // Close frees the selection gesture event. After this call, the event must not
-// be used.
+// be used, except that calling Close again is a safe no-op.
 func (e *SelectionGestureEvent) Close() {
+	if e == nil || e.ptr == nil {
+		return
+	}
 	C.ghostty_selection_gesture_event_free(e.ptr)
+	e.ptr = nil
 }
 
 // ClearOption clears a selection gesture event option.

@@ -86,9 +86,14 @@ func NewRenderStateRowIterator() (*RenderStateRowIterator, error) {
 }
 
 // Close frees the underlying row iterator handle. After this call,
-// the iterator must not be used.
+// the iterator must not be used, except that calling Close again is a
+// safe no-op.
 func (ri *RenderStateRowIterator) Close() {
+	if ri == nil || ri.ptr == nil {
+		return
+	}
 	C.ghostty_render_state_row_iterator_free(ri.ptr)
+	ri.ptr = nil
 }
 
 // Next advances the iterator to the next row. Returns true if the

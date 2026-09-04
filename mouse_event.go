@@ -152,9 +152,14 @@ func NewMouseEvent() (*MouseEvent, error) {
 }
 
 // Close frees the underlying mouse event handle. After this call,
-// the mouse event must not be used.
+// the mouse event must not be used, except that calling Close again is a
+// safe no-op.
 func (e *MouseEvent) Close() {
+	if e == nil || e.ptr == nil {
+		return
+	}
 	C.ghostty_mouse_event_free(e.ptr)
+	e.ptr = nil
 }
 
 // SetAction sets the mouse action (press, release, motion).

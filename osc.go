@@ -131,9 +131,14 @@ func NewOSCParser() (*OSCParser, error) {
 	return &OSCParser{ptr: ptr}, nil
 }
 
-// Close frees the parser. Commands borrowed from it become invalid.
+// Close frees the parser. Commands borrowed from it become invalid. Calling
+// Close again is a safe no-op.
 func (p *OSCParser) Close() {
+	if p == nil || p.ptr == nil {
+		return
+	}
 	C.ghostty_osc_free(p.ptr)
+	p.ptr = nil
 }
 
 // Reset clears partially parsed input and returns the parser to its initial

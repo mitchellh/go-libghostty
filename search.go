@@ -133,9 +133,13 @@ func NewSearch(t *Terminal) (*Search, error) {
 // Close releases resources owned by the search. If the terminal is still
 // open, Close also releases state tracked by the terminal. Callers must not
 // access the terminal concurrently while Close runs. The Search must not be
-// used after Close returns.
+// used after Close returns, except that calling Close again is a safe no-op.
 func (s *Search) Close() {
+	if s == nil || s.ptr == nil {
+		return
+	}
 	C.ghostty_search_free(s.ptr)
+	s.ptr = nil
 }
 
 // Tick performs a bounded amount of search work and returns the new status.

@@ -125,9 +125,14 @@ func NewKeyEncoder() (*KeyEncoder, error) {
 }
 
 // Close frees the underlying key encoder handle. After this call,
-// the encoder must not be used.
+// the encoder must not be used, except that calling Close again is a
+// safe no-op.
 func (enc *KeyEncoder) Close() {
+	if enc == nil || enc.ptr == nil {
+		return
+	}
 	C.ghostty_key_encoder_free(enc.ptr)
+	enc.ptr = nil
 }
 
 // SetOptBool sets a boolean encoder option. Use this for options

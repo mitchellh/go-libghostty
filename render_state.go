@@ -134,9 +134,14 @@ func NewRenderState() (*RenderState, error) {
 }
 
 // Close frees the underlying render state handle. After this call,
-// the render state must not be used.
+// the render state must not be used, except that calling Close again is
+// a safe no-op.
 func (rs *RenderState) Close() {
+	if rs == nil || rs.ptr == nil {
+		return
+	}
 	C.ghostty_render_state_free(rs.ptr)
+	rs.ptr = nil
 }
 
 // Update updates the render state from a terminal instance. This

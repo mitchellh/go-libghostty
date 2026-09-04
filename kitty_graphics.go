@@ -714,9 +714,13 @@ func NewKittyGraphicsPlacementIterator() (*KittyGraphicsPlacementIterator, error
 }
 
 // Close frees the placement iterator. After this call, the iterator
-// must not be used.
+// must not be used, except that calling Close again is a safe no-op.
 func (it *KittyGraphicsPlacementIterator) Close() {
+	if it == nil || it.ptr == nil {
+		return
+	}
 	C.ghostty_kitty_graphics_placement_iterator_free(it.ptr)
+	it.ptr = nil
 }
 
 // SetLayer sets the z-layer filter for the iterator. Only placements

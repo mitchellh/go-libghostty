@@ -137,9 +137,14 @@ func NewMouseEncoder() (*MouseEncoder, error) {
 }
 
 // Close frees the underlying mouse encoder handle. After this call,
-// the encoder must not be used.
+// the encoder must not be used, except that calling Close again is a
+// safe no-op.
 func (enc *MouseEncoder) Close() {
+	if enc == nil || enc.ptr == nil {
+		return
+	}
 	C.ghostty_mouse_encoder_free(enc.ptr)
+	enc.ptr = nil
 }
 
 // SetOptTrackingMode sets the mouse tracking mode on the encoder.

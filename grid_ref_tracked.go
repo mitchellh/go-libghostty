@@ -22,6 +22,9 @@ type TrackedGridRef struct {
 // Close frees the tracked grid reference. Passing an already-closed tracked
 // reference is safe; after Close, the reference must not be used again.
 func (g *TrackedGridRef) Close() {
+	if g == nil || g.ptr == nil {
+		return
+	}
 	C.ghostty_tracked_grid_ref_free(g.ptr)
 	g.ptr = nil
 }

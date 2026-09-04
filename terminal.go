@@ -786,15 +786,22 @@ func terminalFromC(cterm C.GhosttyTerminal, cfg TerminalConfig) *Terminal {
 }
 
 // Close frees the underlying terminal handle and releases the cgo.Handle.
-// After this call, the terminal must not be used.
+// After this call, the terminal must not be used, except that calling
+// Close again is a safe no-op.
 func (t *Terminal) Close() {
+	if t == nil || t.ptr == nil {
+		return
+	}
 	if t.handle != 0 {
 		t.handle.Delete()
 		t.handle = 0
 	}
 	C.ghostty_terminal_free(t.ptr)
+	t.ptr = nil
 	if t.effectBuf != nil {
 		Free(t.effectBuf, t.effectBufLen)
+		t.effectBuf = nil
+		t.effectBufLen = 0
 	}
 }
 
