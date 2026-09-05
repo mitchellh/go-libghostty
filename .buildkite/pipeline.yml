@@ -65,6 +65,7 @@ steps:
       - effects
       - formatter
       - grid-traverse
+      - input
       - modes
       - render
 
