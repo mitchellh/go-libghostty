@@ -201,6 +201,31 @@ func TestTerminalActiveSelectionFormat(t *testing.T) {
 	}
 }
 
+func TestTerminalEmptySelectionFormat(t *testing.T) {
+	term, err := NewTerminal(WithSize(20, 5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// An actual selection over a blank cell exercises the successful empty
+	// allocation path, rather than the no-active-selection result.
+	ref, err := term.GridRef(Point{Tag: PointTagActive, X: 0, Y: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := term.SetSelection(&Selection{Start: *ref, End: *ref}); err != nil {
+		t.Fatal(err)
+	}
+	formatted, err := term.SelectionFormat(WithSelectionTrim(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(formatted) != 0 {
+		t.Fatalf("expected blank selection to format empty output, got %q", formatted)
+	}
+}
+
 func TestSelectionGestureAPIs(t *testing.T) {
 	term, err := NewTerminal(WithSize(20, 4), WithMaxScrollbackLines(100))
 	if err != nil {

@@ -18,7 +18,7 @@ import "unsafe"
 
 // Alloc allocates len bytes through the default libghostty allocator
 // (NULL allocator). Returns a pointer to the allocated memory or nil
-// if the allocation failed.
+// if len is zero or the allocation failed.
 //
 // The returned memory must be freed with Free using the same length.
 // C: ghostty_alloc

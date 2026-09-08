@@ -140,6 +140,9 @@ func TestFormatterReflectsCurrentState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if out1 != "" {
+		t.Fatalf("expected empty terminal to format empty string, got %q", out1)
+	}
 
 	// Write some text and format again.
 	term.VTWrite([]byte("after write"))
@@ -150,9 +153,6 @@ func TestFormatterReflectsCurrentState(t *testing.T) {
 
 	if !strings.Contains(out2, "after write") {
 		t.Fatalf("expected second format to contain 'after write', got %q", out2)
-	}
-	if strings.Contains(out1, "after write") {
-		t.Fatal("first format should not contain text written afterward")
 	}
 }
 

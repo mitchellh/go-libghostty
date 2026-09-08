@@ -17,8 +17,8 @@ func ghosttySizeToInt(size C.size_t) (int, bool) {
 }
 
 // copyGhosttyString copies a borrowed, binary-safe GhosttyString into Go
-// memory. For zero-length strings the pointer is intentionally ignored
-// because libghostty does not require it to be valid.
+// memory. Library-produced empty strings point to valid storage, but no
+// bytes need to be read when the length is zero.
 func copyGhosttyString(value C.GhosttyString) ([]byte, bool) {
 	length, ok := ghosttySizeToInt(value.len)
 	if !ok {
