@@ -77,6 +77,7 @@
 //
 // # Linking
 //
-// This is a cgo package. By default it links the shared library via
-// pkg-config. Build with "-tags static" to link statically instead.
+// This is a cgo package that links libghostty-vt via pkg-config. By
+// default it links statically. Build with "-tags dynamic" to link the
+// shared library instead, which then must be available at runtime.
 package libghostty

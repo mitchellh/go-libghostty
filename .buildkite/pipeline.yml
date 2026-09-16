@@ -33,22 +33,22 @@ steps:
       .buildkite/scripts/retry-on-zig-fetch nix develop -c make build
       nix develop -c make test
 
-  - label: ":package: build (shared)"
+  - label: ":package: build (static)"
     <<: *retry
-    # Default cgo build: dynamically links against libghostty-vt.
-    # Confirms the standard build path still compiles end-to-end.
+    # Default cgo build: statically links libghostty-vt. Confirms the
+    # standard build path still compiles end-to-end.
     command: |
       .buildkite/scripts/retry-on-zig-fetch nix develop -c make build
       nix develop -c go build ./...
 
-  - label: ":package: build (static)"
+  - label: ":package: build (shared)"
     <<: *retry
-    # `-tags static` swaps the cgo wiring to statically link
+    # `-tags dynamic` swaps the cgo wiring to link the shared
     # libghostty-vt. Verified separately because the linker flags and
-    # symbol resolution differ from the shared build.
+    # symbol resolution differ from the static build.
     command: |
       .buildkite/scripts/retry-on-zig-fetch nix develop -c make build
-      nix develop -c go build -tags static ./...
+      nix develop -c go build -tags dynamic ./...
 
   - label: ":go: example {{matrix}}"
     <<: *retry
