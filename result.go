@@ -41,8 +41,50 @@ const (
 )
 
 // Error holds a non-success Ghostty result.
+//
+// Use [errors.As] to inspect the Result, or [errors.Is] against one of
+// the Err* sentinels to test for a specific result code:
+//
+//	if errors.Is(err, libghostty.ErrNoValue) {
+//		// The requested value is unavailable.
+//	}
 type Error struct {
 	Result Result
+}
+
+// Sentinel errors, one per non-success [Result]. Compare with
+// [errors.Is]. They match any [*Error] carrying the same Result,
+// including errors returned by this package's functions and errors
+// wrapped by callers with fmt.Errorf("...: %w", err).
+var (
+	// ErrOutOfMemory matches [ResultOutOfMemory].
+	ErrOutOfMemory error = &Error{Result: ResultOutOfMemory}
+
+	// ErrInvalidValue matches [ResultInvalidValue].
+	ErrInvalidValue error = &Error{Result: ResultInvalidValue}
+
+	// ErrOutOfSpace matches [ResultOutOfSpace].
+	ErrOutOfSpace error = &Error{Result: ResultOutOfSpace}
+
+	// ErrNoValue matches [ResultNoValue].
+	ErrNoValue error = &Error{Result: ResultNoValue}
+
+	// ErrIO matches [ResultIOError].
+	ErrIO error = &Error{Result: ResultIOError}
+
+	// ErrLimitExceeded matches [ResultLimitExceeded].
+	ErrLimitExceeded error = &Error{Result: ResultLimitExceeded}
+
+	// ErrRejected matches [ResultRejected].
+	ErrRejected error = &Error{Result: ResultRejected}
+)
+
+// Is reports whether target is an [*Error] with the same Result. This
+// lets [errors.Is] match the Err* sentinels even though every failure
+// returns a freshly allocated Error.
+func (e *Error) Is(target error) bool {
+	t, ok := target.(*Error)
+	return ok && t.Result == e.Result
 }
 
 func (e *Error) Error() string {
