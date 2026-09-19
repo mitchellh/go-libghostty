@@ -401,6 +401,30 @@ func (t *Terminal) SetScrollbackMaxBytes(limit *uint) error {
 	))
 }
 
+// SetResizePullScrollback controls whether a resize may pull rows out of
+// scrollback back into the active area.
+//
+// When true (the default), growing rows reveals scrollback if the cursor is
+// on the bottom row, and a column reflow that needs fewer rows reveals
+// scrollback as well. When false, growing rows always appends blank rows at
+// the bottom and a column reflow keeps the top of the active area on the same
+// content, so a line that is fully in scrollback stays there. A soft-wrapped
+// line with at least one row still in the active area may still unwrap back
+// into view.
+//
+// Set this to false when the pty keeps its own screen buffer without
+// scrollback (e.g. Windows ConPTY), since it cannot pull rows back and would
+// otherwise disagree with the terminal about the screen contents after a
+// resize. This setting is preserved across a full reset (RIS).
+func (t *Terminal) SetResizePullScrollback(enabled bool) error {
+	v := C.bool(enabled)
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_RESIZE_PULL_SCROLLBACK,
+		unsafe.Pointer(&v),
+	))
+}
+
 // SetScrollbackMaxLines sets the approximate maximum number of physical
 // lines retained in scrollback. Passing nil removes the line limit. Lowering
 // the limit may immediately remove eligible historical pages.

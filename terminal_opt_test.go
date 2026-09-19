@@ -508,6 +508,30 @@ func TestTerminalWithWritePty(t *testing.T) {
 	}
 }
 
+func TestTerminalWritePtyDECRQM(t *testing.T) {
+	var received []byte
+	term, err := NewTerminal(WithSize(80, 24), WithWritePty(func(_ *Terminal, data []byte) {
+		received = append(received, data...)
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// DEC private mode query (DECAWM, set by default).
+	term.VTWrite([]byte("\x1b[?7$p"))
+	if want := []byte("\x1b[?7;1$y"); !bytes.Equal(received, want) {
+		t.Fatalf("expected DEC mode report %q, got %q", want, received)
+	}
+
+	// ANSI mode query (IRM, after enabling it).
+	received = nil
+	term.VTWrite([]byte("\x1b[4h\x1b[4$p"))
+	if want := []byte("\x1b[4;1$y"); !bytes.Equal(received, want) {
+		t.Fatalf("expected ANSI mode report %q, got %q", want, received)
+	}
+}
+
 func TestTerminalWithTitleChanged(t *testing.T) {
 	var titleChanged int
 	term, err := NewTerminal(WithSize(80, 24), WithTitleChanged(func(_ *Terminal) {
@@ -897,5 +921,71 @@ func TestTerminalUnknownSequenceEffect(t *testing.T) {
 	term.VTWrite([]byte("\x1b_disabled\x1b\\"))
 	if len(sequences) != 2 {
 		t.Fatalf("expected zero limit to disable capture, got %d callbacks", len(sequences))
+	}
+}
+
+func TestTerminalResizePullScrollback(t *testing.T) {
+	// fill writes enough lines to push content into scrollback and leave
+	// the cursor on the bottom row of a 5-row terminal.
+	fill := func(term *Terminal) {
+		for i := 0; i < 10; i++ {
+			term.VTWrite([]byte("line\r\n"))
+		}
+	}
+
+	cases := []struct {
+		name  string
+		opts  []TerminalOption
+		wantY uint16
+	}{
+		// Growing rows pulls three scrollback rows into view, so the
+		// cursor follows its content down the screen.
+		{"default", nil, 7},
+		{"enabled", []TerminalOption{WithResizePullScrollback(true)}, 7},
+		// Growing rows appends blank rows at the bottom instead, so the
+		// cursor stays on its original row.
+		{"disabled", []TerminalOption{WithResizePullScrollback(false)}, 4},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := append([]TerminalOption{WithSize(10, 5)}, tc.opts...)
+			term, err := NewTerminal(opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer term.Close()
+
+			fill(term)
+			if err := term.Resize(10, 8, 8, 16); err != nil {
+				t.Fatal(err)
+			}
+			y, err := term.CursorY()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if y != tc.wantY {
+				t.Fatalf("expected cursor y %d, got %d", tc.wantY, y)
+			}
+		})
+	}
+
+	// The setter can toggle the behavior on a live terminal.
+	term, err := NewTerminal(WithSize(10, 5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	if err := term.SetResizePullScrollback(false); err != nil {
+		t.Fatal(err)
+	}
+	fill(term)
+	if err := term.Resize(10, 8, 8, 16); err != nil {
+		t.Fatal(err)
+	}
+	if y, err := term.CursorY(); err != nil {
+		t.Fatal(err)
+	} else if y != 4 {
+		t.Fatalf("expected cursor y 4, got %d", y)
 	}
 }

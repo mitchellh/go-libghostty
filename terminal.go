@@ -85,6 +85,11 @@ type TerminalConfig struct {
 	// retains the secure disabled default.
 	TitleReport *bool
 
+	// ResizePullScrollback optionally controls whether a resize may pull
+	// rows out of scrollback back into the active area. Nil retains the
+	// default of true.
+	ResizePullScrollback *bool
+
 	// ModeDefaults configure terminal mode reset defaults. Each entry also
 	// immediately replaces the current value of that mode.
 	ModeDefaults []TerminalModeConfig
@@ -515,6 +520,15 @@ func WithTitleReport(enabled bool) TerminalOption {
 	}
 }
 
+// WithResizePullScrollback controls whether a resize may pull rows out of
+// scrollback back into the active area. See Terminal.SetResizePullScrollback
+// for details. The default is true.
+func WithResizePullScrollback(enabled bool) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.ResizePullScrollback = &enabled
+	}
+}
+
 // WithModeDefault sets the reset default for mode. Setting a default also
 // immediately updates the mode's current value. Modes that represent
 // transitions or mirror other terminal state are rejected by NewTerminal.
@@ -733,6 +747,12 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 	}
 	if cfg.TitleReport != nil {
 		if err := t.SetTitleReport(*cfg.TitleReport); err != nil {
+			t.Close()
+			return nil, err
+		}
+	}
+	if cfg.ResizePullScrollback != nil {
+		if err := t.SetResizePullScrollback(*cfg.ResizePullScrollback); err != nil {
 			t.Close()
 			return nil, err
 		}
