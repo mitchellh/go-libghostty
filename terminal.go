@@ -12,12 +12,14 @@ import (
 
 // Terminal wraps a Ghostty VT terminal handle.
 // It is stateful, not safe for concurrent use, and not reentrant.
-// Serialize all calls that touch a terminal, including getters,
-// setters, [Terminal.VTWrite], [Terminal.VTWriteUntilGround],
-// [Terminal.Resize], [Terminal.Close],
-// and any borrowed handles derived from it. Effect callbacks run
-// synchronously during terminal operations; they must not reenter the same
-// terminal. Clipboard callbacks may block to mediate user permission because
+// Serialize all calls that access a terminal. This includes getters, setters,
+// [Terminal.VTWrite], [Terminal.VTWriteUntilGround], [Terminal.Resize],
+// [Terminal.Close], and operations on borrowed handles derived from the
+// terminal. Effect callbacks run synchronously during terminal operations. They
+// must not call [Terminal.VTWrite] or [Terminal.VTWriteUntilGround] on the same
+// terminal.
+// Individual callback types document other operations that are safe during a
+// callback. Clipboard callbacks may block to mediate user permission because
 // the VT stream waits for their replies.
 // C: GhosttyTerminal
 type Terminal struct {
@@ -41,6 +43,7 @@ type Terminal struct {
 	onColorScheme         ColorSchemeFn
 	onDeviceAttributes    DeviceAttributesFn
 	onUnknownSequence     UnknownSequenceFn
+	onRenderHold          RenderHoldFunc
 
 	// effectBuf holds C-allocated memory for the most recent response
 	// returned by an effect trampoline (e.g. enquiry, xtversion).
@@ -117,6 +120,7 @@ type TerminalConfig struct {
 	onColorScheme         ColorSchemeFn
 	onDeviceAttributes    DeviceAttributesFn
 	onUnknownSequence     UnknownSequenceFn
+	onRenderHold          RenderHoldFunc
 }
 
 // WritePtyFn is called when the terminal writes data back to the pty, such as
@@ -424,6 +428,30 @@ type TerminalUnknownSequence struct {
 // C: GhosttyTerminalUnknownSequenceFn
 type UnknownSequenceFn func(t *Terminal, sequence TerminalUnknownSequence)
 
+// RenderHoldFunc is called when a terminal starts or ends a render hold. A
+// render hold asks the application to keep displaying the last complete frame
+// while the running program prepares the next one. held is true when the hold
+// starts and false when it ends.
+//
+// Synchronized output (DEC private mode 2026) is currently the only feature
+// that uses render holds. A hold ends when VT input disables synchronized
+// output, the terminal is reset, or the terminal is resized. Repeating the
+// current synchronized output setting does not call the function again.
+// Changing [ModeSyncOutput] with [Terminal.SetMode] does not call the function.
+//
+// The function runs synchronously while the terminal processes VT input. When
+// held is true, the terminal contains the last complete frame, and later bytes
+// from the same write have not been processed. A renderer can call
+// [RenderState.Update] from the function to preserve that frame, then pause
+// further updates until held is false.
+//
+// libghostty does not time out render holds. Applications should stop honoring
+// a hold after a reasonable duration so that a program cannot freeze the
+// display indefinitely.
+//
+// C: GhosttyTerminalRenderHoldFn
+type RenderHoldFunc func(t *Terminal, held bool)
+
 // EnquiryFn is called when the terminal receives ENQ (0x05).
 // The first parameter is the terminal that triggered the effect.
 // Return the response bytes; nil or empty means no response.
@@ -632,6 +660,15 @@ func WithUnknownSequence(fn UnknownSequenceFn) TerminalOption {
 	}
 }
 
+// WithRenderHold returns a terminal option that sets fn as the render hold
+// callback. If fn is nil, render hold notifications are disabled. See
+// [RenderHoldFunc] for callback behavior and timeout guidance.
+func WithRenderHold(fn RenderHoldFunc) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.onRenderHold = fn
+	}
+}
+
 // WithEnquiry registers an effect handler invoked when the terminal
 // receives an ENQ character (0x05). Return the response bytes; nil
 // or empty means no response.
@@ -802,6 +839,7 @@ func terminalFromC(cterm C.GhosttyTerminal, cfg TerminalConfig) *Terminal {
 		onColorScheme:         cfg.onColorScheme,
 		onDeviceAttributes:    cfg.onDeviceAttributes,
 		onUnknownSequence:     cfg.onUnknownSequence,
+		onRenderHold:          cfg.onRenderHold,
 	}
 }
 

@@ -27,6 +27,7 @@ extern bool goSizeTrampoline(GhosttyTerminal, void*, GhosttySizeReportSize*);
 extern bool goColorSchemeTrampoline(GhosttyTerminal, void*, GhosttyColorScheme*);
 extern bool goDeviceAttributesTrampoline(GhosttyTerminal, void*, GhosttyDeviceAttributes*);
 extern void goUnknownSequenceTrampoline(GhosttyTerminal, void*, GhosttyTerminalUnknownSequence*);
+extern void goRenderHoldTrampoline(GhosttyTerminal, void*, bool);
 
 // Helpers to set each effect via ghostty_terminal_set.
 // We need these because cgo cannot take the address of a Go-exported
@@ -72,6 +73,9 @@ static inline GhosttyResult set_device_attributes(GhosttyTerminal t) {
 }
 static inline GhosttyResult set_unknown_sequence(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE, (const void*)goUnknownSequenceTrampoline);
+}
+static inline GhosttyResult set_render_hold(GhosttyTerminal t) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, (const void*)goRenderHoldTrampoline);
 }
 
 // Convert the integer cgo.Handle to native userdata only after control enters
@@ -196,6 +200,11 @@ func (t *Terminal) syncEffects() {
 	} else {
 		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE)
 	}
+	if t.onRenderHold != nil {
+		C.set_render_hold(t.ptr)
+	} else {
+		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_RENDER_HOLD)
+	}
 }
 
 // hasEffects reports whether any native effect trampoline needs to recover
@@ -214,7 +223,8 @@ func (t *Terminal) hasEffects() bool {
 		t.onSize != nil ||
 		t.onColorScheme != nil ||
 		t.onDeviceAttributes != nil ||
-		t.onUnknownSequence != nil
+		t.onUnknownSequence != nil ||
+		t.onRenderHold != nil
 }
 
 // terminalFromUserdata recovers a *Terminal from the C userdata pointer.
@@ -567,6 +577,14 @@ func goUnknownSequenceTrampoline(
 	}
 
 	t.onUnknownSequence(t, value)
+}
+
+//export goRenderHoldTrampoline
+func goRenderHoldTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer, held C.bool) {
+	t := terminalFromUserdata(userdata)
+	if t.onRenderHold != nil {
+		t.onRenderHold(t, bool(held))
+	}
 }
 
 //export goEnquiryTrampoline

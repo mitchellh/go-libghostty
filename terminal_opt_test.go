@@ -2,6 +2,7 @@ package libghostty
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 )
 
@@ -170,6 +171,85 @@ func TestTerminalSetEffectBell(t *testing.T) {
 	term.VTWrite([]byte("\x07"))
 	if bellCount != 1 {
 		t.Fatalf("expected still 1 bell after clearing, got %d", bellCount)
+	}
+}
+
+func TestTerminalWithRenderHold(t *testing.T) {
+	renderState, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer renderState.Close()
+
+	var transitions []bool
+	var captureErr error
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithRenderHold(func(term *Terminal, held bool) {
+			transitions = append(transitions, held)
+			if held {
+				// Capture the completed frame before the terminal processes the
+				// program's next update.
+				captureErr = renderState.Update(term)
+			}
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// Synchronized output begins and ends one render hold. Repeating either
+	// mode transition must not emit duplicate notifications.
+	term.VTWrite([]byte("\x1b[?2026h\x1b[?2026h"))
+	term.VTWrite([]byte("\x1b[?2026l\x1b[?2026l"))
+
+	// A full reset and a resize both force an active hold to end so an
+	// abandoned mode cannot freeze rendering indefinitely.
+	term.VTWrite([]byte("\x1b[?2026h"))
+	term.Reset()
+	term.VTWrite([]byte("\x1b[?2026h"))
+	if err := term.Resize(81, 25, 8, 16); err != nil {
+		t.Fatal(err)
+	}
+
+	// Direct mode changes update terminal state without reporting render hold
+	// transitions. Only changes caused by VT input, reset, or resize report it.
+	if err := term.SetMode(ModeSyncOutput, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := term.SetMode(ModeSyncOutput, false); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []bool{true, false, true, false, true, false}
+	if !slices.Equal(transitions, want) {
+		t.Fatalf("expected render hold transitions %v, got %v", want, transitions)
+	}
+	if captureErr != nil {
+		t.Fatalf("capture render state from hold callback: %v", captureErr)
+	}
+}
+
+func TestTerminalSetEffectRenderHold(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	var transitions []bool
+	term.SetEffectRenderHold(func(_ *Terminal, held bool) {
+		transitions = append(transitions, held)
+	})
+	term.VTWrite([]byte("\x1b[?2026h"))
+
+	// Clearing the callback takes effect immediately. The terminal still
+	// updates its mode, but no further Go notification is delivered.
+	term.SetEffectRenderHold(nil)
+	term.VTWrite([]byte("\x1b[?2026l"))
+	if want := []bool{true}; !slices.Equal(transitions, want) {
+		t.Fatalf("expected render hold transitions %v, got %v", want, transitions)
 	}
 }
 

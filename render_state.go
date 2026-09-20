@@ -144,11 +144,13 @@ func (rs *RenderState) Close() {
 	rs.ptr = nil
 }
 
-// Update updates the render state from a terminal instance. This
-// consumes terminal/screen dirty state and is the only render-state
-// operation that touches the terminal. Hold exclusive access to the
-// terminal while this call is running, and do not read from the same
-// render state concurrently with Update.
+// Update copies the terminal's current display state into rs. It consumes
+// dirty state from the terminal and its screen. Update is the only render state
+// operation that accesses the terminal.
+//
+// The caller must hold exclusive access to the terminal while Update runs. Do
+// not read from rs concurrently with Update. A [RenderHoldFunc] may call Update
+// when a hold begins to capture the last complete frame.
 func (rs *RenderState) Update(t *Terminal) error {
 	return resultError(C.ghostty_render_state_update(rs.ptr, t.ptr))
 }

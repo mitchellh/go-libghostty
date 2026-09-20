@@ -48,18 +48,23 @@
 //
 // # Effects
 //
-// The terminal communicates side-effects back to the host through
+// The terminal communicates side effects back to the host through
 // effect callbacks. Register them at creation time with functional
 // options like [WithWritePty], [WithDesktopNotification], and
-// [WithProgressReport], or on a live terminal with
+// [WithProgressReport], or on an existing terminal with
 // [Terminal.SetEffectWritePty] and friends.
 //
 // Effect callbacks run synchronously during [Terminal.VTWrite] and
 // [Terminal.VTWriteUntilGround]. They must not call either VT write method
 // on the same terminal and should avoid blocking for long periods.
 //
-// [WithWritePty] is the most common effect — it delivers data that
-// the terminal wants to send back to the pty (e.g. query responses):
+// Use [WithRenderHold] when creating a terminal or
+// [Terminal.SetEffectRenderHold] later. A [RenderHoldFunc] may call
+// [RenderState.Update] to preserve the last complete frame when a render hold
+// begins.
+//
+// [WithWritePty] is the most common effect. It delivers data that the terminal
+// wants to send back to the pty, such as query responses:
 //
 //	term, _ := libghostty.NewTerminal(
 //		libghostty.WithSize(80, 24),

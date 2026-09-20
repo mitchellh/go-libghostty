@@ -111,6 +111,14 @@ func (t *Terminal) SetEffectUnknownSequence(fn UnknownSequenceFn) {
 	t.syncEffects()
 }
 
+// SetEffectRenderHold sets fn as the render hold callback. Passing nil removes
+// the current callback. See [RenderHoldFunc] for callback behavior and timeout
+// guidance.
+func (t *Terminal) SetEffectRenderHold(fn RenderHoldFunc) {
+	t.onRenderHold = fn
+	t.syncEffects()
+}
+
 // SetColorBackground sets the default background color. Pass nil to
 // clear (unset).
 func (t *Terminal) SetColorBackground(c *ColorRGB) error {
