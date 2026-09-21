@@ -454,6 +454,11 @@ func (d *SnapshotDecoder) Next() (bool, error) {
 // Decode decodes and validates one complete snapshot in a single call.
 // The returned terminal is caller-owned. Bytes following the FINISH record
 // remain outside the snapshot and can be located with SourceOffset.
+//
+// The returned terminal has no effect callbacks. Modes are restored, so a
+// snapshot taken during synchronized output yields a terminal that is
+// already in a render hold; a [RenderHoldFunc] attached afterwards is not
+// told about it. See [RenderHoldFunc].
 // C: ghostty_snapshot_decoder_decode
 func (d *SnapshotDecoder) Decode() (*Terminal, error) {
 	result := C.ghostty_go_snapshot_decoder_decode(d.ptr)

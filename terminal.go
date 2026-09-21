@@ -475,11 +475,23 @@ type UnknownSequenceFn func(t *Terminal, sequence TerminalUnknownSequence)
 // current synchronized output setting does not call the function again.
 // Changing [ModeSyncOutput] with [Terminal.SetMode] does not call the function.
 //
-// The function runs synchronously while the terminal processes VT input. When
-// held is true, the terminal contains the last complete frame, and later bytes
-// from the same write have not been processed. A renderer can call
+// The function runs synchronously on the goroutine that triggered it. Most
+// often that is [Terminal.VTWrite] or [Terminal.VTWriteUntilGround] processing
+// VT input, but [Terminal.Reset] and [Terminal.Resize] also call it with held
+// false before they return when they end an active hold. Do not hold a lock
+// across those calls that the function also needs, or it will deadlock.
+//
+// When held is true, the terminal contains the last complete frame, and later
+// bytes from the same write have not been processed. A renderer can call
 // [RenderState.Update] from the function to preserve that frame, then pause
 // further updates until held is false.
+//
+// The function reports transitions only. A terminal can already be in a hold
+// when the function is attached, most commonly one restored by
+// [SnapshotDecoder] from a snapshot taken during synchronized output. No call
+// with held true follows for that hold; the first call is held false when it
+// ends. Check [Terminal.Mode] with [ModeSyncOutput] after attaching to learn
+// the initial state.
 //
 // libghostty does not time out render holds. Applications should stop honoring
 // a hold after a reasonable duration so that a program cannot freeze the
@@ -904,6 +916,9 @@ func (t *Terminal) Close() {
 // Reset performs a full terminal reset (RIS).
 // All state is reset to initial configuration (modes, scrollback,
 // scrolling region, screen contents). Dimensions are preserved.
+//
+// If synchronized output is active, Reset ends the render hold and calls
+// the [RenderHoldFunc] with held false before returning.
 func (t *Terminal) Reset() {
 	C.ghostty_terminal_reset(t.ptr)
 }
@@ -912,6 +927,9 @@ func (t *Terminal) Reset() {
 // Both cols and rows must be greater than zero. cellWidthPx and
 // cellHeightPx specify the pixel dimensions of a single cell, used
 // for image protocols and size reports.
+//
+// If synchronized output is active, Resize ends the render hold and calls
+// the [RenderHoldFunc] with held false before returning.
 func (t *Terminal) Resize(cols, rows uint16, cellWidthPx, cellHeightPx uint32) error {
 	return resultError(C.ghostty_terminal_resize(
 		t.ptr,

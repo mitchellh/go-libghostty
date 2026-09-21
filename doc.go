@@ -61,7 +61,8 @@
 // Use [WithRenderHold] when creating a terminal or
 // [Terminal.SetEffectRenderHold] later. A [RenderHoldFunc] may call
 // [RenderState.Update] to preserve the last complete frame when a render hold
-// begins.
+// begins. Unlike other effects, it can also run from [Terminal.Reset] and
+// [Terminal.Resize], which end an active hold; see [RenderHoldFunc].
 //
 // [WithWritePty] is the most common effect. It delivers data that the terminal
 // wants to send back to the pty, such as query responses:

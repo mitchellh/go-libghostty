@@ -582,3 +582,52 @@ func TestNewSnapshotDecoderNilReader(t *testing.T) {
 
 var _ io.Reader = (*chunkReader)(nil)
 var _ io.Writer = (*chunkWriter)(nil)
+
+func TestSnapshotRestoresRenderHoldState(t *testing.T) {
+	// Documented in RenderHoldFunc: a snapshot taken during synchronized
+	// output restores a terminal that is already in a hold, and a callback
+	// attached afterwards sees only the hold ending, never it beginning.
+	src, err := NewTerminal(WithSize(8, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	src.VTWrite([]byte("\x1b[?2026h"))
+
+	data, err := src.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec, err := NewSnapshotDecoderBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dec.Close()
+	term, err := dec.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	held, err := term.Mode(ModeSyncOutput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !held {
+		t.Fatal("expected restored terminal to be in synchronized output")
+	}
+
+	var calls []bool
+	term.SetEffectRenderHold(func(_ *Terminal, held bool) {
+		calls = append(calls, held)
+	})
+	// Re-enabling is a no-op: transitions only.
+	term.VTWrite([]byte("\x1b[?2026h"))
+	if len(calls) != 0 {
+		t.Fatalf("expected no calls for a repeated enable, got %v", calls)
+	}
+	term.VTWrite([]byte("\x1b[?2026l"))
+	if len(calls) != 1 || calls[0] {
+		t.Fatalf("expected a single held=false call, got %v", calls)
+	}
+}
