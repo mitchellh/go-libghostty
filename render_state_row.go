@@ -46,7 +46,30 @@ const (
 	// RenderStateRowDataCellsRaw is a borrowed view of all packed cell values
 	// in the current row (GhosttyCellsView).
 	RenderStateRowDataCellsRaw RenderStateRowData = C.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS_RAW
+
+	// RenderStateRowDataViewportY is the signed viewport-relative row position (int32_t).
+	RenderStateRowDataViewportY RenderStateRowData = C.GHOSTTY_RENDER_STATE_ROW_DATA_VIEWPORT_Y
+
+	// RenderStateRowDataID is the stable row identity (GhosttyRenderStateRowId).
+	RenderStateRowDataID RenderStateRowData = C.GHOSTTY_RENDER_STATE_ROW_DATA_ID
 )
+
+// RenderStateRowID identifies a row across render state updates, even when
+// scrolling moves the row to a different position. It supports equality
+// comparisons and can be used as a map key. The zero value is not a valid ID.
+//
+// A renderer can use an ID to cache work for a row. Reuse a cached result only
+// if the ID appears in the new update and [RenderStateRowIterator.Dirty] is
+// false. Discard entries for IDs that no longer appear. IDs are never reused
+// for a different row.
+//
+// An ID can disappear when its row leaves the captured area, is removed from
+// scrollback, or is replaced by a terminal operation.
+//
+// C: GhosttyRenderStateRowId
+type RenderStateRowID struct {
+	bits [2]uint64
+}
 
 // RenderStateRowSelection is the row-local selected cell range.
 // C: GhosttyRenderStateRowSelection
@@ -96,19 +119,26 @@ func (ri *RenderStateRowIterator) Close() {
 	ri.ptr = nil
 }
 
-// Next advances the iterator to the next row. Returns true if the
-// iterator moved successfully and row data is available. Returns
-// false when there are no more rows.
+// Next advances to the next row and reports whether row data is available.
+// It returns false when no rows remain. Rows are visited from top to bottom,
+// including any overscan rows. Use [RenderStateRowIterator.ViewportY] to
+// position the current row relative to the viewport.
 func (ri *RenderStateRowIterator) Next() bool {
 	return bool(C.ghostty_render_state_row_iterator_next(ri.ptr))
 }
 
-// NextDirty advances to the next row that requires a redraw and returns its
-// viewport y coordinate. A full-dirty render state returns every remaining
-// row, a partial-dirty state skips clean rows, and a clean state returns false.
-// NextDirty does not clear any dirty state.
+// NextDirty advances to the next row that requires a redraw. It returns the
+// row's index and true, or zero and false when no such rows remain.
+//
+// The index counts from the first captured row, including overscan. Without
+// overscan, it equals the row's position in the viewport. With overscan, use
+// [RenderStateRowIterator.ViewportY] to position the row instead.
+//
+// When the entire render state is dirty, NextDirty visits every remaining row.
+// Otherwise it skips clean rows. It does not clear any dirty flags.
+//
 // C: ghostty_render_state_row_iterator_next_dirty
-func (ri *RenderStateRowIterator) NextDirty() (uint16, bool) {
+func (ri *RenderStateRowIterator) NextDirty() (index uint16, ok bool) {
 	var y C.uint16_t
 	if !bool(C.ghostty_render_state_row_iterator_next_dirty(ri.ptr, &y)) {
 		return 0, false
@@ -163,6 +193,29 @@ func (ri *RenderStateRowIterator) Dirty() (bool, error) {
 		return false, err
 	}
 	return bool(v), nil
+}
+
+// ViewportY returns the current row's position in rows relative to the top of
+// the viewport. The first visible row is zero. Overscan rows above the viewport
+// have negative positions. Those below it start at the height returned by
+// [RenderState.Rows].
+func (ri *RenderStateRowIterator) ViewportY() (int32, error) {
+	var v C.int32_t
+	if err := resultError(C.ghostty_render_state_row_get(ri.ptr, C.GHOSTTY_RENDER_STATE_ROW_DATA_VIEWPORT_Y, unsafe.Pointer(&v))); err != nil {
+		return 0, err
+	}
+	return int32(v), nil
+}
+
+// ID returns the current row's identity. The value can be kept after the
+// iterator advances or the render state is updated. See [RenderStateRowID]
+// for how to use IDs when caching rendered rows.
+func (ri *RenderStateRowIterator) ID() (RenderStateRowID, error) {
+	var v C.GhosttyRenderStateRowId
+	if err := resultError(C.ghostty_render_state_row_get(ri.ptr, C.GHOSTTY_RENDER_STATE_ROW_DATA_ID, unsafe.Pointer(&v))); err != nil {
+		return RenderStateRowID{}, err
+	}
+	return RenderStateRowID{bits: [2]uint64{uint64(v.bits[0]), uint64(v.bits[1])}}, nil
 }
 
 // SetDirty sets the dirty state for the current row.

@@ -473,9 +473,11 @@ func (t *Terminal) SetTitleReport(enabled bool) error {
 	))
 }
 
-// SetUnknownMaxBytes sets the maximum content bytes retained for each
-// unsupported terminal sequence. A zero limit disables capture and prevents
-// unknown-sequence callbacks.
+// SetUnknownMaxBytes sets the maximum number of bytes retained for each
+// unsupported APC or OSC sequence. Zero disables capture and callbacks.
+// Longer sequences are still reported, with their Truncated field set to true.
+// Register a callback with [Terminal.SetEffectUnknownSequence] to receive the
+// captured data.
 func (t *Terminal) SetUnknownMaxBytes(limit uint) error {
 	v := C.size_t(limit)
 	return resultError(C.ghostty_terminal_set(

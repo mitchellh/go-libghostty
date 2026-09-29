@@ -2,9 +2,16 @@ cmake_minimum_required(VERSION 3.19)
 project(go-libghostty LANGUAGES C)
 
 include(FetchContent)
+
+# cgo links the native libraries directly and does not need an XCFramework.
+# Disable that packaging step so builds do not require a full Xcode installation
+# when Apple's Command Line Tools provide an xcodebuild stub on PATH.
+set(GHOSTTY_ZIG_BUILD_FLAGS "-Demit-xcframework=false" CACHE STRING
+    "Additional flags to pass to the upstream Zig build")
+
 FetchContent_Declare(ghostty
     GIT_REPOSITORY https://github.com/ghostty-org/ghostty.git
-    GIT_TAG 27e8b3fa85d9cf8c7cd5ae2ced348bcb0a4fba9c
+    GIT_TAG 3a3047f6b62a791fd8b12d9f07a85b3d2160370b
 )
 FetchContent_MakeAvailable(ghostty)
 

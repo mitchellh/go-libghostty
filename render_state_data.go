@@ -37,8 +37,16 @@ const (
 	// RenderStateDataCols is the viewport width in cells (uint16_t).
 	RenderStateDataCols RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_COLS
 
-	// RenderStateDataRows is the viewport height in cells (uint16_t).
+	// RenderStateDataRows is the viewport height in cells, excluding overscan (uint16_t).
 	RenderStateDataRows RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_ROWS
+
+	// RenderStateDataOverscan is the number of extra rows captured by the last update
+	// (GhosttyRenderStateOverscan).
+	RenderStateDataOverscan RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_OVERSCAN
+
+	// RenderStateDataOverscanRequest is the request used for the next update
+	// (GhosttyRenderStateOverscan).
+	RenderStateDataOverscanRequest RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_OVERSCAN_REQUEST
 
 	// RenderStateDataDirty is the current dirty state
 	// (GhosttyRenderStateDirty).
@@ -352,12 +360,13 @@ func (rs *RenderState) Dirty() (RenderStateDirty, error) {
 	return RenderStateDirty(v), nil
 }
 
-// RowIterator populates a pre-allocated row iterator with row data
-// from the render state. The iterator can then be advanced with Next
-// and queried with getter methods.
+// RowIterator initializes ri to iterate over the rows from the last update.
+// Advance it with [RenderStateRowIterator.Next] before reading row data.
+// Rows are ordered from top to bottom and include any overscan rows. Use
+// [RenderStateRowIterator.ViewportY] to position each row in the viewport.
 //
-// The iterator can be reused across multiple calls. The iterator view
-// is only valid until the next call to [RenderState.Update].
+// The iterator can be reused by calling RowIterator again. Its data is valid
+// only until the next call to [RenderState.Update].
 func (rs *RenderState) RowIterator(ri *RenderStateRowIterator) error {
 	return resultError(C.ghostty_render_state_get(
 		rs.ptr,
@@ -366,7 +375,7 @@ func (rs *RenderState) RowIterator(ri *RenderStateRowIterator) error {
 	))
 }
 
-// Rows returns the viewport height in cells.
+// Rows returns the viewport height in cells, excluding overscan.
 func (rs *RenderState) Rows() (uint16, error) {
 	var v C.uint16_t
 	if err := resultError(C.ghostty_render_state_get(rs.ptr, C.GHOSTTY_RENDER_STATE_DATA_ROWS, unsafe.Pointer(&v))); err != nil {
@@ -379,4 +388,46 @@ func (rs *RenderState) Rows() (uint16, error) {
 func (rs *RenderState) SetDirty(dirty RenderStateDirty) error {
 	v := C.GhosttyRenderStateDirty(dirty)
 	return resultError(C.ghostty_render_state_set(rs.ptr, C.GHOSTTY_RENDER_STATE_OPTION_DIRTY, unsafe.Pointer(&v)))
+}
+
+// SetOverscan sets the number of extra rows to capture above and below the
+// viewport on subsequent updates. The request remains in effect until changed.
+// A zero [RenderStateOverscan] captures only the visible viewport.
+//
+// Changing the request leaves the current row data valid. The next update
+// applies the request and marks the entire render state as dirty. Use
+// [RenderState.Overscan] after that update to find how many rows were available.
+//
+// C: GHOSTTY_RENDER_STATE_OPTION_OVERSCAN
+func (rs *RenderState) SetOverscan(request RenderStateOverscan) error {
+	v := C.GhosttyRenderStateOverscan{above: C.uint16_t(request.Above), below: C.uint16_t(request.Below)}
+	return resultError(C.ghostty_render_state_set(rs.ptr, C.GHOSTTY_RENDER_STATE_OPTION_OVERSCAN, unsafe.Pointer(&v)))
+}
+
+// Overscan returns the number of extra rows captured by the last update.
+// Each count is at most the corresponding count set by [RenderState.SetOverscan].
+// Fewer rows are captured when the viewport is near the start or end of the
+// terminal's contents. Below is zero when the viewport is scrolled to the bottom.
+//
+// [RenderState.RowIterator] includes these extra rows. Cursor coordinates still
+// refer to the visible viewport and are available only when the cursor is
+// inside it.
+func (rs *RenderState) Overscan() (RenderStateOverscan, error) {
+	return rs.getOverscan(C.GHOSTTY_RENDER_STATE_DATA_OVERSCAN)
+}
+
+// OverscanRequest returns the counts most recently set by [RenderState.SetOverscan].
+// Both counts are zero if SetOverscan has not been called. The next update uses
+// this request. Use [RenderState.Overscan] for the counts from the last update.
+func (rs *RenderState) OverscanRequest() (RenderStateOverscan, error) {
+	return rs.getOverscan(C.GHOSTTY_RENDER_STATE_DATA_OVERSCAN_REQUEST)
+}
+
+// getOverscan reads either the requested or captured overscan counts.
+func (rs *RenderState) getOverscan(data C.GhosttyRenderStateData) (RenderStateOverscan, error) {
+	var v C.GhosttyRenderStateOverscan
+	if err := resultError(C.ghostty_render_state_get(rs.ptr, data, unsafe.Pointer(&v))); err != nil {
+		return RenderStateOverscan{}, err
+	}
+	return RenderStateOverscan{Above: uint16(v.above), Below: uint16(v.below)}, nil
 }

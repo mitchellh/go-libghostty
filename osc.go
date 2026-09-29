@@ -95,6 +95,10 @@ const (
 
 	// OSCCommandKittyDesktopNotification uses Kitty's desktop notification protocol.
 	OSCCommandKittyDesktopNotification OSCCommandType = C.GHOSTTY_OSC_COMMAND_KITTY_DESKTOP_NOTIFICATION
+
+	// OSCCommandUnknown identifies an OSC command whose number the parser
+	// does not recognize. Enable capture with [OSCParser.SetUnknownMaxBytes].
+	OSCCommandUnknown OSCCommandType = C.GHOSTTY_OSC_COMMAND_UNKNOWN
 )
 
 // OSCCommandData identifies typed data extractable from an OSC command.
@@ -107,6 +111,36 @@ const (
 
 	// OSCDataChangeWindowTitleString extracts a null-terminated title string.
 	OSCDataChangeWindowTitleString OSCCommandData = C.GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR
+
+	// OSCDataUnknownContent extracts an unknown command's body as a
+	// GhosttyString. The bytes belong to the parser and remain valid only
+	// until the next operation on it. Use [OSCCommand.UnknownContent] for a copy.
+	OSCDataUnknownContent OSCCommandData = C.GHOSTTY_OSC_DATA_UNKNOWN_CONTENT
+
+	// OSCDataUnknownTruncated extracts whether an unknown command's content
+	// was shortened by the capture limit or an allocation failure (bool).
+	OSCDataUnknownTruncated OSCCommandData = C.GHOSTTY_OSC_DATA_UNKNOWN_TRUNCATED
+
+	// OSCDataUnknownTerminator extracts how an unknown command ended
+	// (GhosttyOscTerminator).
+	OSCDataUnknownTerminator OSCCommandData = C.GHOSTTY_OSC_DATA_UNKNOWN_TERMINATOR
+)
+
+// OSCTerminator identifies how an OSC sequence ended. Replies should use the
+// same terminator as the request.
+//
+// These constants identify terminators but are not byte values. [OSCParser.End]
+// takes the terminating byte instead.
+//
+// C: GhosttyOscTerminator
+type OSCTerminator int
+
+const (
+	// OSCTerminatorST is the string terminator: ESC (0x1b) followed by a backslash (0x5c).
+	OSCTerminatorST OSCTerminator = C.GHOSTTY_OSC_TERMINATOR_ST
+
+	// OSCTerminatorBEL is the bell byte (0x07).
+	OSCTerminatorBEL OSCTerminator = C.GHOSTTY_OSC_TERMINATOR_BEL
 )
 
 // OSCParser incrementally parses the bytes inside an OSC sequence.
@@ -141,8 +175,9 @@ func (p *OSCParser) Close() {
 	p.ptr = nil
 }
 
-// Reset clears partially parsed input and returns the parser to its initial
-// state.
+// Reset clears the current sequence without changing parser options.
+// Call Reset before parsing another sequence. Commands returned by earlier
+// calls to [OSCParser.End] are no longer valid.
 func (p *OSCParser) Reset() {
 	C.ghostty_osc_reset(p.ptr)
 }
@@ -152,8 +187,14 @@ func (p *OSCParser) Next(b byte) {
 	C.ghostty_osc_next(p.ptr, C.uint8_t(b))
 }
 
-// End finalizes the current sequence. terminator is normally BEL (0x07) or
-// the final backslash byte of ST (0x5c).
+// End finishes parsing the current sequence and returns its command.
+// The terminator argument is the final byte: BEL (0x07) or the backslash in
+// ST (0x5c). If the sequence was cancelled, pass CAN (0x18) or SUB (0x1a).
+// Cancelled sequences are never reported as [OSCCommandUnknown].
+//
+// Invalid sequences return a command of type [OSCCommandInvalid]. The command
+// remains valid until the next operation on p. Call [OSCParser.Reset] before
+// feeding the next sequence.
 func (p *OSCParser) End(terminator byte) OSCCommand {
 	return OSCCommand{
 		ptr: C.ghostty_osc_end(p.ptr, C.uint8_t(terminator)),
@@ -183,4 +224,57 @@ func (c OSCCommand) WindowTitle() (string, bool) {
 		return "", false
 	}
 	return C.GoString(ptr), true
+}
+
+// SetUnknownMaxBytes sets the maximum number of bytes retained for each OSC
+// sequence whose command number the parser does not recognize. Zero, the
+// default, disables capture. A positive limit enables [OSCCommandUnknown].
+//
+// Longer sequences are still reported, but contain only the first limit bytes.
+// [OSCCommand.UnknownTruncated] reports whether content was lost. Recognized
+// commands are never reported as unknown, even when their contents are invalid.
+//
+// The limit remains set across calls to [OSCParser.Reset]. Set it before feeding
+// a sequence, since a sequence already in progress may keep the previous limit.
+// Limits up to 2048 bytes use the parser's existing buffer. Larger limits may
+// allocate memory for each unknown sequence.
+//
+// C: ghostty_osc_set, GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES
+func (p *OSCParser) SetUnknownMaxBytes(limit uint) error {
+	v := C.size_t(limit)
+	return resultError(C.ghostty_osc_set(p.ptr, C.GHOSTTY_OSC_OPT_UNKNOWN_MAX_BYTES, unsafe.Pointer(&v)))
+}
+
+// UnknownContent returns a copy of an unknown command's body, including its
+// command number and excluding the sequence delimiters. For example, the OSC
+// sequence "\x1b]7400;hello\a" has the body "7400;hello". The bytes may be kept
+// or modified after the parser is reset or closed.
+//
+// It returns nil, false if c is not [OSCCommandUnknown] or the content cannot
+// be represented as a Go byte slice.
+func (c OSCCommand) UnknownContent() (content []byte, ok bool) {
+	var v C.GhosttyString
+	if !c.Data(OSCDataUnknownContent, unsafe.Pointer(&v)) {
+		return nil, false
+	}
+	return copyGhosttyString(v)
+}
+
+// UnknownTruncated reports whether an unknown command's content was shortened
+// by the capture limit or a memory allocation failure. When truncated is true,
+// [OSCCommand.UnknownContent] returns only the beginning of the sequence.
+// The ok result is false if c is not [OSCCommandUnknown].
+func (c OSCCommand) UnknownTruncated() (truncated bool, ok bool) {
+	var v C.bool
+	ok = c.Data(OSCDataUnknownTruncated, unsafe.Pointer(&v))
+	return bool(v), ok
+}
+
+// UnknownTerminator returns how an unknown command ended. Use the same
+// terminator when replying to the command. The ok result is false if c is not
+// [OSCCommandUnknown].
+func (c OSCCommand) UnknownTerminator() (terminator OSCTerminator, ok bool) {
+	var v C.GhosttyOscTerminator
+	ok = c.Data(OSCDataUnknownTerminator, unsafe.Pointer(&v))
+	return OSCTerminator(v), ok
 }

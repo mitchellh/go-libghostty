@@ -445,3 +445,27 @@ func TestTerminalPaletteRoundTrip(t *testing.T) {
 		t.Fatalf("expected palette[128] = {128,0,0}, got %+v", p[128])
 	}
 }
+
+func TestTerminalMouseShape(t *testing.T) {
+	term, err := NewTerminal(WithSize(10, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	for _, tc := range []struct {
+		input string
+		want  MouseShape
+	}{
+		{"", MouseShapeText},
+		{"\x1b]22;pointer\a", MouseShapePointer},
+		{"\x1b]22;crosshair\x1b\\", MouseShapeCrosshair},
+		{"\x1b]22;not-a-shape\a", MouseShapeCrosshair},
+		// Reset preserves the application-requested shape.
+		{"\x1bc", MouseShapeCrosshair},
+	} {
+		term.VTWrite([]byte(tc.input))
+		if got, err := term.MouseShape(); err != nil || got != tc.want {
+			t.Fatalf("%q: got %v, %v; want %v", tc.input, got, err, tc.want)
+		}
+	}
+}

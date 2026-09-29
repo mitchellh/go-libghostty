@@ -212,3 +212,22 @@ func TestSearchTerminalMayCloseFirst(t *testing.T) {
 	}
 	search.Close()
 }
+
+func TestSearchTickAfterTerminalClose(t *testing.T) {
+	term, err := NewTerminal(WithSize(10, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	search, err := NewSearch(term)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer search.Close()
+	term.Close()
+	if _, err := search.Tick(); err == nil {
+		t.Fatal("expected a closed-terminal error")
+	} else if e, ok := err.(*Error); !ok || e.Result != ResultInvalidValue {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

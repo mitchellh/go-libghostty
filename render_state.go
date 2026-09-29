@@ -34,6 +34,23 @@ type RenderState struct {
 	ptr C.GhosttyRenderState
 }
 
+// RenderStateOverscan specifies the number of extra rows above and below the
+// visible viewport. These rows let a renderer draw part of an adjacent row
+// while scrolling smoothly.
+//
+// [RenderState.SetOverscan] sets the requested counts. [RenderState.Overscan]
+// returns the counts available after an update, which may be smaller. The
+// zero value requests no extra rows.
+//
+// C: GhosttyRenderStateOverscan
+type RenderStateOverscan struct {
+	// Above is the number of rows above the viewport.
+	Above uint16
+
+	// Below is the number of rows below the viewport.
+	Below uint16
+}
+
 // RenderStateDirty describes the dirty state after an update.
 // C: GhosttyRenderStateDirty
 type RenderStateDirty int

@@ -312,3 +312,104 @@ func TestRenderStateRowIteratorSelection(t *testing.T) {
 		t.Fatalf("expected no row selection on second row, got %+v", sel)
 	}
 }
+
+func TestRenderStateOverscanAndRowIdentity(t *testing.T) {
+	term, err := NewTerminal(WithSize(10, 3), WithMaxScrollbackLines(100))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.VTWrite([]byte("zero\r\none\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix"))
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+	ri, err := NewRenderStateRowIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ri.Close()
+	request := RenderStateOverscan{Above: 1, Below: 1}
+	if got, err := rs.OverscanRequest(); err != nil || got != (RenderStateOverscan{}) {
+		t.Fatalf("default request: %+v, %v", got, err)
+	}
+	if err := rs.SetOverscan(request); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := rs.OverscanRequest(); err != nil || got != request {
+		t.Fatalf("request: %+v, %v", got, err)
+	}
+	read := func(want RenderStateOverscan) map[int32]RenderStateRowID {
+		t.Helper()
+		if err := rs.Update(term); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := rs.Rows(); err != nil || got != 3 {
+			t.Fatalf("viewport rows: %d, %v", got, err)
+		}
+		if got, err := rs.Overscan(); err != nil || got != want {
+			t.Fatalf("captured: %+v, %v; want %+v", got, err, want)
+		}
+		if err := rs.RowIterator(ri); err != nil {
+			t.Fatal(err)
+		}
+		ids := make(map[int32]RenderStateRowID)
+		seen := make(map[RenderStateRowID]bool)
+		for ri.Next() {
+			y, err := ri.ViewportY()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if wantY := int32(len(ids)) - int32(want.Above); y != wantY {
+				t.Fatalf("y: %d, want %d", y, wantY)
+			}
+			id, err := ri.ID()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if id == (RenderStateRowID{}) || seen[id] {
+				t.Fatal("zero or duplicate ID")
+			}
+			seen[id] = true
+			ids[y] = id
+		}
+		if len(ids) != 3+int(want.Above)+int(want.Below) {
+			t.Fatalf("captured %d rows", len(ids))
+		}
+		return ids
+	}
+	read(RenderStateOverscan{Above: 1}) // No rows below the active viewport.
+	term.ScrollViewportRow(1)
+	before := read(request)
+	term.ScrollViewportRow(2)
+	after := read(request)
+	if before[1] != after[0] || before[2] != after[1] {
+		t.Fatal("row IDs changed across scrolling")
+	}
+	// Dirty iteration returns capture indices, while ViewportY includes overscan.
+	if err := rs.RowIterator(ri); err != nil {
+		t.Fatal(err)
+	}
+	for i := uint16(0); i < 5; i++ {
+		index, ok := ri.NextDirty()
+		if !ok || index != i {
+			t.Fatalf("dirty index: %d, %v; want %d", index, ok, i)
+		}
+		if y, err := ri.ViewportY(); err != nil || y != int32(i)-1 {
+			t.Fatalf("dirty y: %d, %v", y, err)
+		}
+	}
+	if _, ok := ri.NextDirty(); ok {
+		t.Fatal("unexpected extra dirty row")
+	}
+	term.ScrollViewportTop()
+	read(RenderStateOverscan{Below: 1}) // No rows above the first scrollback row.
+	if err := rs.SetOverscan(RenderStateOverscan{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := rs.Overscan(); err != nil || got != (RenderStateOverscan{Below: 1}) {
+		t.Fatalf("setting request changed snapshot: %+v, %v", got, err)
+	}
+	read(RenderStateOverscan{})
+}

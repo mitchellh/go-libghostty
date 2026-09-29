@@ -176,6 +176,10 @@ const (
 	// TerminalDataKittyClipboardWriteMaxBytes is the configured maximum number
 	// of decoded bytes in a single Kitty clipboard protocol write (size_t).
 	TerminalDataKittyClipboardWriteMaxBytes TerminalData = C.GHOSTTY_TERMINAL_DATA_CLIPBOARD_WRITE_MAX_BYTES
+
+	// TerminalDataMouseShape is the mouse pointer shape requested through
+	// OSC 22 (GhosttyMouseShape). See [Terminal.MouseShape].
+	TerminalDataMouseShape TerminalData = C.GHOSTTY_TERMINAL_DATA_MOUSE_SHAPE
 )
 
 // ActiveScreen returns which screen buffer is currently active.
@@ -469,6 +473,18 @@ func (t *Terminal) MouseTracking() (bool, error) {
 		return false, err
 	}
 	return bool(v), nil
+}
+
+// MouseShape returns the mouse pointer shape requested through OSC 22 by the
+// program running in the terminal. The initial shape is [MouseShapeText].
+// This value does not include changes made by the host application, such as
+// showing a hand when the pointer is over a link.
+func (t *Terminal) MouseShape() (MouseShape, error) {
+	var v C.GhosttyMouseShape
+	if err := resultError(C.ghostty_terminal_get(t.ptr, C.GHOSTTY_TERMINAL_DATA_MOUSE_SHAPE, unsafe.Pointer(&v))); err != nil {
+		return 0, err
+	}
+	return MouseShape(v), nil
 }
 
 // Pwd returns the terminal's current working directory as set by

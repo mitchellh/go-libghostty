@@ -145,6 +145,9 @@ func (s *Search) Close() {
 // Tick performs a bounded amount of search work and returns the new status.
 // It uses only data already copied into the Search, so it may run while
 // another goroutine accesses the terminal.
+//
+// If the terminal has been closed, Tick returns an [Error] whose Result is
+// [ResultInvalidValue].
 func (s *Search) Tick() (SearchStatus, error) {
 	var status C.GhosttySearchStatus
 	if err := resultError(C.ghostty_search_tick(s.ptr, &status)); err != nil {

@@ -95,6 +95,12 @@ static inline const GhosttyTerminalUnknownStringSequence* unknown_sequence_apc(
 	return &sequence->value.apc;
 }
 
+// Return the OSC member only after checking the sequence tag in Go.
+static inline const GhosttyTerminalUnknownOscSequence* unknown_sequence_osc(
+		const GhosttyTerminalUnknownSequence* sequence) {
+	return &sequence->value.osc;
+}
+
 // Helper to clear an effect by setting it to NULL.
 static inline GhosttyResult clear_effect(GhosttyTerminal t, GhosttyTerminalOption opt) {
 	return ghostty_terminal_set(t, opt, NULL);
@@ -573,6 +579,17 @@ func goUnknownSequenceTrampoline(
 		value.APC = TerminalUnknownStringSequence{
 			Truncated: bool(apc.truncated),
 			Content:   content,
+		}
+	} else if value.Tag == TerminalUnknownSequenceOSC {
+		osc := C.unknown_sequence_osc(sequence)
+		content, ok := copyGhosttyString(osc.content)
+		if !ok {
+			return
+		}
+		value.OSC = TerminalUnknownOSCSequence{
+			Truncated:  bool(osc.truncated),
+			Content:    content,
+			Terminator: OSCTerminator(osc.terminator),
 		}
 	}
 

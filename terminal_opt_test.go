@@ -1069,3 +1069,38 @@ func TestTerminalResizePullScrollback(t *testing.T) {
 		t.Fatalf("expected cursor y 4, got %d", y)
 	}
 }
+
+func TestTerminalUnknownOSCEffect(t *testing.T) {
+	var sequences []TerminalUnknownSequence
+	term, err := NewTerminal(WithSize(10, 3), WithUnknownMaxBytes(8),
+		WithUnknownSequence(func(_ *Terminal, seq TerminalUnknownSequence) { sequences = append(sequences, seq) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	// Fragment input to exercise retention across VTWrite calls.
+	term.VTWrite([]byte("\x1b]7400;"))
+	term.VTWrite([]byte("hello\a\x1b]7401;ok\x1b\\"))
+	term.VTWrite([]byte("\x1b]7402;cancel\x18\x1b]22;not-a-shape\a\x1b]2;title\a"))
+	if len(sequences) != 2 {
+		t.Fatalf("expected 2 callbacks, got %d", len(sequences))
+	}
+	first, second := sequences[0], sequences[1]
+	if first.Tag != TerminalUnknownSequenceOSC || string(first.OSC.Content) != "7400;hel" || !first.OSC.Truncated || first.OSC.Terminator != OSCTerminatorBEL {
+		t.Fatalf("first: %+v", first)
+	}
+	if second.Tag != TerminalUnknownSequenceOSC || string(second.OSC.Content) != "7401;ok" || second.OSC.Truncated || second.OSC.Terminator != OSCTerminatorST {
+		t.Fatalf("second: %+v", second)
+	}
+	if err := term.SetUnknownMaxBytes(0); err != nil {
+		t.Fatal(err)
+	}
+	term.VTWrite([]byte("\x1b]7400;ignored\a"))
+	if len(sequences) != 2 {
+		t.Fatal("capture remained enabled")
+	}
+	term.Close()
+	if string(first.OSC.Content) != "7400;hel" {
+		t.Fatal("callback content was not copied")
+	}
+}

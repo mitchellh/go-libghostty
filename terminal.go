@@ -393,6 +393,9 @@ const (
 	// TerminalUnknownSequenceAPC identifies an unsupported Application Program
 	// Command sequence.
 	TerminalUnknownSequenceAPC TerminalUnknownSequenceTag = C.GHOSTTY_TERMINAL_UNKNOWN_SEQUENCE_APC
+
+	// TerminalUnknownSequenceOSC identifies an unsupported Operating System Command.
+	TerminalUnknownSequenceOSC TerminalUnknownSequenceTag = C.GHOSTTY_TERMINAL_UNKNOWN_SEQUENCE_OSC
 )
 
 // TerminalUnknownStringSequence contains one unsupported string sequence.
@@ -409,8 +412,28 @@ type TerminalUnknownStringSequence struct {
 	Content []byte
 }
 
-// TerminalUnknownSequence is an unsupported terminal sequence. APC is
-// populated when Tag is [TerminalUnknownSequenceAPC]. For tags introduced by
+// TerminalUnknownOSCSequence contains an OSC command whose number libghostty
+// does not recognize. Content is copied before [UnknownSequenceFn] is called
+// and may be kept or modified after the callback returns.
+//
+// C: GhosttyTerminalUnknownOscSequence
+type TerminalUnknownOSCSequence struct {
+	// Truncated reports whether Content was shortened by the configured byte
+	// limit or a memory allocation failure. If true, Content contains only
+	// the beginning of the sequence.
+	Truncated bool
+
+	// Content contains the sequence body, including the command number but
+	// excluding ESC ] and the terminator. For example, "\x1b]7400;hello\a"
+	// produces "7400;hello". The bytes need not be valid UTF-8.
+	Content []byte
+
+	// Terminator identifies how the request ended. Replies should use the same terminator.
+	Terminator OSCTerminator
+}
+
+// TerminalUnknownSequence is an unsupported terminal sequence. Its Tag
+// identifies which of APC or OSC is populated. For tags introduced by
 // newer libghostty versions, fields unknown to this binding remain zero.
 // C: GhosttyTerminalUnknownSequence
 type TerminalUnknownSequence struct {
@@ -420,11 +443,24 @@ type TerminalUnknownSequence struct {
 	// APC contains the unsupported APC value when Tag is
 	// TerminalUnknownSequenceAPC.
 	APC TerminalUnknownStringSequence
+
+	// OSC contains the command when Tag is [TerminalUnknownSequenceOSC].
+	OSC TerminalUnknownOSCSequence
 }
 
-// UnknownSequenceFn is called synchronously for normally terminated terminal
-// sequences whose identifier libghostty does not support. Capture must also be
-// enabled with [WithUnknownMaxBytes] or [Terminal.SetUnknownMaxBytes].
+// UnknownSequenceFn handles terminal sequences that libghostty does not
+// recognize. Capture must also be enabled with [WithUnknownMaxBytes] or
+// [Terminal.SetUnknownMaxBytes].
+//
+// APC and OSC sequences are currently reported. The callback should check
+// sequence.Tag and ignore tags it does not handle. Cancelled sequences,
+// invalid contents of recognized commands, and disabled known protocols are
+// not reported.
+//
+// The callback runs during [Terminal.VTWrite]. It may write a reply directly
+// to the pseudoterminal, keeping the reply in order with libghostty's own
+// replies. It must not call VTWrite on the same terminal.
+//
 // C: GhosttyTerminalUnknownSequenceFn
 type UnknownSequenceFn func(t *Terminal, sequence TerminalUnknownSequence)
 
@@ -569,8 +605,10 @@ func WithModeDefault(mode Mode, value bool) TerminalOption {
 	}
 }
 
-// WithUnknownMaxBytes sets the maximum content bytes retained for each
-// unsupported terminal sequence. A zero limit disables capture.
+// WithUnknownMaxBytes sets the maximum number of bytes retained for each
+// unsupported APC or OSC sequence. Zero, the default, disables capture.
+// Longer sequences are still reported, with their Truncated field set to true.
+// Register a callback with [WithUnknownSequence] to receive the captured data.
 func WithUnknownMaxBytes(limit uint) TerminalOption {
 	return func(c *TerminalConfig) {
 		c.UnknownMaxBytes = &limit
