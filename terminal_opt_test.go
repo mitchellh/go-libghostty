@@ -1104,3 +1104,103 @@ func TestTerminalUnknownOSCEffect(t *testing.T) {
 		t.Fatal("callback content was not copied")
 	}
 }
+
+func TestTerminalWithSemanticPrompt(t *testing.T) {
+	var events []TerminalSemanticPrompt
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithSemanticPrompt(func(_ *Terminal, event TerminalSemanticPrompt) {
+			events = append(events, event)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// Walk one full command lifecycle: a right prompt, input, output with an
+	// encoded command line, and a failed end with an error description.
+	term.VTWrite([]byte("\x1b]133;P;k=r\a"))
+	term.VTWrite([]byte("\x1b]133;B\a"))
+	term.VTWrite([]byte("\x1b]133;C;cmdline_url=ls%20-la\a"))
+	term.VTWrite([]byte("\x1b]133;D;-1;err=boom\a"))
+
+	want := []TerminalSemanticPrompt{
+		{Kind: SemanticPromptStart, PromptKind: PromptRight},
+		{Kind: SemanticPromptInputStart, PromptKind: PromptPrimary},
+		{Kind: SemanticPromptOutputStart, Command: "ls -la"},
+		{Kind: SemanticPromptCommandEnd, HasExitCode: true, ExitCode: -1, Error: "boom"},
+	}
+	if !slices.Equal(events, want) {
+		t.Fatalf("expected semantic prompt events %+v, got %+v", want, events)
+	}
+}
+
+func TestTerminalSetEffectSemanticPrompt(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	var kinds []SemanticPromptKind
+	term.SetEffectSemanticPrompt(func(_ *Terminal, event TerminalSemanticPrompt) {
+		kinds = append(kinds, event.Kind)
+	})
+	term.VTWrite([]byte("\x1b]133;A\a"))
+
+	// Clearing the callback stops further notifications immediately.
+	term.SetEffectSemanticPrompt(nil)
+	term.VTWrite([]byte("\x1b]133;B\a"))
+	if want := []SemanticPromptKind{SemanticPromptStart}; !slices.Equal(kinds, want) {
+		t.Fatalf("expected semantic prompt kinds %v, got %v", want, kinds)
+	}
+}
+
+func TestTerminalWithReset(t *testing.T) {
+	var order []string
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithProgressReport(func(_ *Terminal, _ TerminalProgressReport) {
+			order = append(order, "progress")
+		}),
+		WithReset(func(_ *Terminal) {
+			order = append(order, "reset")
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// A soft reset (DECSTR) must not report a full reset.
+	term.VTWrite([]byte("\x1b[!p"))
+	if len(order) != 0 {
+		t.Fatalf("soft reset reported events %v", order)
+	}
+
+	// RIS reports the progress removal before the reset itself.
+	term.VTWrite([]byte("\x1bc"))
+	if want := []string{"progress", "reset"}; !slices.Equal(order, want) {
+		t.Fatalf("expected events %v, got %v", want, order)
+	}
+}
+
+func TestTerminalSetEffectReset(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	count := 0
+	term.SetEffectReset(func(_ *Terminal) { count++ })
+	term.VTWrite([]byte("\x1bc"))
+
+	// Clearing the callback stops further notifications immediately.
+	term.SetEffectReset(nil)
+	term.VTWrite([]byte("\x1bc"))
+	if count != 1 {
+		t.Fatalf("expected 1 reset, got %d", count)
+	}
+}

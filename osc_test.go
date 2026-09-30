@@ -91,9 +91,13 @@ func TestOSCParserUnknown(t *testing.T) {
 			t.Fatal("captured content was not copied")
 		}
 	}
+	// Cancelled sequences are discarded whether or not they contain a
+	// recognized command.
 	for _, end := range []byte{0x18, 0x1a} {
-		if got := parse("7400;hello", end).Type(); got != OSCCommandInvalid {
-			t.Fatalf("cancelled: %v", got)
+		for _, body := range []string{"7400;hello", "2;title"} {
+			if got := parse(body, end).Type(); got != OSCCommandInvalid {
+				t.Fatalf("cancelled %q: %v", body, got)
+			}
 		}
 	}
 	// A recognized but malformed command must not turn into an extension.

@@ -119,6 +119,22 @@ func (t *Terminal) SetEffectRenderHold(fn RenderHoldFunc) {
 	t.syncEffects()
 }
 
+// SetEffectSemanticPrompt sets fn as the function called when the shell
+// reports a step of a command. Passing nil removes the current function. See
+// [SemanticPromptFunc] for details.
+func (t *Terminal) SetEffectSemanticPrompt(fn SemanticPromptFunc) {
+	t.onSemanticPrompt = fn
+	t.syncEffects()
+}
+
+// SetEffectReset sets fn as the function called when the running program
+// performs a full terminal reset. Passing nil removes the current function.
+// See [ResetFunc] for details.
+func (t *Terminal) SetEffectReset(fn ResetFunc) {
+	t.onReset = fn
+	t.syncEffects()
+}
+
 // SetColorBackground sets the default background color. Pass nil to
 // clear (unset).
 func (t *Terminal) SetColorBackground(c *ColorRGB) error {

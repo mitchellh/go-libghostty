@@ -64,6 +64,11 @@
 // begins. Unlike other effects, it can also run from [Terminal.Reset] and
 // [Terminal.Resize], which end an active hold; see [RenderHoldFunc].
 //
+// Use [WithSemanticPrompt] to follow the commands a user runs in a shell. The
+// shell reports when each prompt is drawn, when a command starts and finishes,
+// and the command's exit code. Use [WithReset] to learn when the running
+// program performs a full terminal reset.
+//
 // [WithWritePty] is the most common effect. It delivers data that the terminal
 // wants to send back to the pty, such as query responses:
 //

@@ -28,6 +28,8 @@ extern bool goColorSchemeTrampoline(GhosttyTerminal, void*, GhosttyColorScheme*)
 extern bool goDeviceAttributesTrampoline(GhosttyTerminal, void*, GhosttyDeviceAttributes*);
 extern void goUnknownSequenceTrampoline(GhosttyTerminal, void*, GhosttyTerminalUnknownSequence*);
 extern void goRenderHoldTrampoline(GhosttyTerminal, void*, bool);
+extern void goSemanticPromptTrampoline(GhosttyTerminal, void*, GhosttyTerminalSemanticPrompt*);
+extern void goResetTrampoline(GhosttyTerminal, void*);
 
 // Helpers to set each effect via ghostty_terminal_set.
 // We need these because cgo cannot take the address of a Go-exported
@@ -76,6 +78,12 @@ static inline GhosttyResult set_unknown_sequence(GhosttyTerminal t) {
 }
 static inline GhosttyResult set_render_hold(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, (const void*)goRenderHoldTrampoline);
+}
+static inline GhosttyResult set_semantic_prompt(GhosttyTerminal t) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT, (const void*)goSemanticPromptTrampoline);
+}
+static inline GhosttyResult set_reset(GhosttyTerminal t) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_RESET, (const void*)goResetTrampoline);
 }
 
 // Convert the integer cgo.Handle to native userdata only after control enters
@@ -211,6 +219,16 @@ func (t *Terminal) syncEffects() {
 	} else {
 		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_RENDER_HOLD)
 	}
+	if t.onSemanticPrompt != nil {
+		C.set_semantic_prompt(t.ptr)
+	} else {
+		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT)
+	}
+	if t.onReset != nil {
+		C.set_reset(t.ptr)
+	} else {
+		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_RESET)
+	}
 }
 
 // hasEffects reports whether any native effect trampoline needs to recover
@@ -230,7 +248,9 @@ func (t *Terminal) hasEffects() bool {
 		t.onColorScheme != nil ||
 		t.onDeviceAttributes != nil ||
 		t.onUnknownSequence != nil ||
-		t.onRenderHold != nil
+		t.onRenderHold != nil ||
+		t.onSemanticPrompt != nil ||
+		t.onReset != nil
 }
 
 // terminalFromUserdata recovers a *Terminal from the C userdata pointer.
@@ -601,6 +621,53 @@ func goRenderHoldTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer, held C
 	t := terminalFromUserdata(userdata)
 	if t.onRenderHold != nil {
 		t.onRenderHold(t, bool(held))
+	}
+}
+
+//export goSemanticPromptTrampoline
+func goSemanticPromptTrampoline(
+	_ C.GhosttyTerminal,
+	userdata unsafe.Pointer,
+	event *C.GhosttyTerminalSemanticPrompt,
+) {
+	t := terminalFromUserdata(userdata)
+	if t.onSemanticPrompt == nil {
+		return
+	}
+
+	// GhosttyTerminalSemanticPrompt is a sized struct. Only read the fields
+	// when libghostty supplied at least the layout this binding knows.
+	if event == nil ||
+		event.size < C.size_t(C.sizeof_GhosttyTerminalSemanticPrompt) {
+		return
+	}
+
+	// The strings are only valid during this call, so copy them into Go
+	// memory before passing the event to the application.
+	command, ok := copyGhosttyString(event.command)
+	if !ok {
+		return
+	}
+	errText, ok := copyGhosttyString(event.error)
+	if !ok {
+		return
+	}
+
+	t.onSemanticPrompt(t, TerminalSemanticPrompt{
+		Kind:        SemanticPromptKind(event.kind),
+		PromptKind:  PromptKind(event.prompt_kind),
+		HasExitCode: bool(event.has_exit_code),
+		ExitCode:    int(event.exit_code),
+		Command:     string(command),
+		Error:       string(errText),
+	})
+}
+
+//export goResetTrampoline
+func goResetTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer) {
+	t := terminalFromUserdata(userdata)
+	if t.onReset != nil {
+		t.onReset(t)
 	}
 }
 

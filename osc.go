@@ -188,13 +188,19 @@ func (p *OSCParser) Next(b byte) {
 }
 
 // End finishes parsing the current sequence and returns its command.
-// The terminator argument is the final byte: BEL (0x07) or the backslash in
-// ST (0x5c). If the sequence was cancelled, pass CAN (0x18) or SUB (0x1a).
-// Cancelled sequences are never reported as [OSCCommandUnknown].
+// The terminator is the byte that ended the sequence. This is usually BEL
+// (0x07), or the backslash (0x5c) that ends an ESC \ string terminator.
+// Commands that send a reply, such as color queries, end the reply the same
+// way the request ended.
 //
-// Invalid sequences return a command of type [OSCCommandInvalid]. The command
-// remains valid until the next operation on p. Call [OSCParser.Reset] before
-// feeding the next sequence.
+// A program can also cancel a sequence partway through by sending CAN (0x18)
+// or SUB (0x1a). Pass that byte as the terminator. The sequence is then
+// discarded, even if the bytes before the cancel form a complete command.
+// This matches the behavior of xterm.
+//
+// If the sequence is invalid or was cancelled, the returned command has type
+// [OSCCommandInvalid]. The command is valid until the next call to a method
+// on p. Call [OSCParser.Reset] before parsing the next sequence.
 func (p *OSCParser) End(terminator byte) OSCCommand {
 	return OSCCommand{
 		ptr: C.ghostty_osc_end(p.ptr, C.uint8_t(terminator)),

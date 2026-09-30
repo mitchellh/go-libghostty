@@ -44,6 +44,8 @@ type Terminal struct {
 	onDeviceAttributes    DeviceAttributesFn
 	onUnknownSequence     UnknownSequenceFn
 	onRenderHold          RenderHoldFunc
+	onSemanticPrompt      SemanticPromptFunc
+	onReset               ResetFunc
 
 	// effectBuf holds C-allocated memory for the most recent response
 	// returned by an effect trampoline (e.g. enquiry, xtversion).
@@ -121,6 +123,8 @@ type TerminalConfig struct {
 	onDeviceAttributes    DeviceAttributesFn
 	onUnknownSequence     UnknownSequenceFn
 	onRenderHold          RenderHoldFunc
+	onSemanticPrompt      SemanticPromptFunc
+	onReset               ResetFunc
 }
 
 // WritePtyFn is called when the terminal writes data back to the pty, such as
@@ -382,6 +386,142 @@ type TerminalProgressReport struct {
 // progress report via OSC 9;4.
 // C: GhosttyTerminalProgressReportFn
 type ProgressReportFn func(t *Terminal, report TerminalProgressReport)
+
+// SemanticPromptKind identifies the step of a shell command that a
+// [TerminalSemanticPrompt] event reports.
+//
+// Later versions of libghostty may add new kinds, so a [SemanticPromptFunc]
+// should ignore kinds it does not recognize.
+//
+// C: GhosttySemanticPromptKind
+type SemanticPromptKind int
+
+const (
+	// SemanticPromptInvalid is the zero value. It is never reported.
+	SemanticPromptInvalid SemanticPromptKind = C.GHOSTTY_SEMANTIC_PROMPT_INVALID
+
+	// SemanticPromptStart means the shell started drawing a prompt. The
+	// event's PromptKind field says which prompt it is.
+	SemanticPromptStart SemanticPromptKind = C.GHOSTTY_SEMANTIC_PROMPT_PROMPT_START
+
+	// SemanticPromptInputStart means the prompt is complete and the user can
+	// start typing a command.
+	SemanticPromptInputStart SemanticPromptKind = C.GHOSTTY_SEMANTIC_PROMPT_INPUT_START
+
+	// SemanticPromptOutputStart means the user submitted a command and it
+	// started running. Everything the terminal receives after this event is
+	// output from that command.
+	SemanticPromptOutputStart SemanticPromptKind = C.GHOSTTY_SEMANTIC_PROMPT_OUTPUT_START
+
+	// SemanticPromptCommandEnd means the command finished running.
+	SemanticPromptCommandEnd SemanticPromptKind = C.GHOSTTY_SEMANTIC_PROMPT_COMMAND_END
+)
+
+// PromptKind identifies which prompt a shell is drawing when it reports
+// [SemanticPromptStart].
+//
+// Most shells only draw a primary prompt. Some also draw a second prompt on
+// the right side of the line, or a short prompt at the start of each extra
+// line when a command spans more than one line.
+//
+// C: GhosttySemanticPromptPromptKind
+type PromptKind int
+
+const (
+	// PromptPrimary is the main prompt shown before each command. It is also
+	// used when the shell does not say which prompt it is drawing.
+	PromptPrimary PromptKind = C.GHOSTTY_SEMANTIC_PROMPT_PROMPT_PRIMARY
+
+	// PromptRight is a prompt drawn at the right edge of the line, such as
+	// the RPROMPT variable in zsh.
+	PromptRight PromptKind = C.GHOSTTY_SEMANTIC_PROMPT_PROMPT_RIGHT
+
+	// PromptContinuation is a prompt at the start of each extra line of a
+	// command that spans more than one line.
+	PromptContinuation PromptKind = C.GHOSTTY_SEMANTIC_PROMPT_PROMPT_CONTINUATION
+
+	// PromptSecondary is a prompt for an extra line of input, such as the PS2
+	// variable in bash. Shells differ in whether they report extra lines as
+	// continuation or secondary prompts, so most applications should treat
+	// PromptContinuation and PromptSecondary the same way.
+	PromptSecondary PromptKind = C.GHOSTTY_SEMANTIC_PROMPT_PROMPT_SECONDARY
+)
+
+// TerminalSemanticPrompt describes one step of a shell command, as reported
+// by the shell's integration script. Shells send these events with the OSC
+// 133 escape sequence to mark where each prompt, command, and command output
+// begins and ends.
+//
+// Kind says which step the event describes. Each other field lists the kinds
+// that set it. For all other kinds, the field holds its zero value.
+//
+// C: GhosttyTerminalSemanticPrompt
+type TerminalSemanticPrompt struct {
+	// Kind is the step of the command that this event describes.
+	Kind SemanticPromptKind
+
+	// PromptKind is the prompt the shell started drawing. It is set for
+	// SemanticPromptStart.
+	PromptKind PromptKind
+
+	// HasExitCode reports whether the shell sent the command's exit code.
+	// It can only be true for SemanticPromptCommandEnd.
+	HasExitCode bool
+
+	// ExitCode is the command's exit code. It is only valid when HasExitCode
+	// is true. Exit codes can be negative, so check HasExitCode instead of
+	// comparing ExitCode against a special value.
+	ExitCode int
+
+	// Command is the command line the user submitted. It is set for
+	// SemanticPromptOutputStart. It is empty if the shell did not send the
+	// command line or sent it in a form that could not be decoded.
+	Command string
+
+	// Error is a message from the shell describing why the command failed.
+	// It is set for SemanticPromptCommandEnd. Few shells send it, so use
+	// ExitCode to decide whether a command failed.
+	Error string
+}
+
+// SemanticPromptFunc is called when the shell reports a step of a command.
+// See [TerminalSemanticPrompt] for the information each event carries.
+//
+// A command normally goes through four steps in order. The prompt starts,
+// input starts, output starts, and then the command ends. After that, the
+// next prompt starts. Shells vary in what they send, though. Many do not
+// send the command line or the exit code, and some skip steps entirely.
+// Handle each event on its own rather than relying on a fixed order.
+//
+// A shell can also report the start of the same prompt more than once, for
+// example when it redraws the prompt after the window is resized. Repeated
+// SemanticPromptStart events are normal.
+//
+// The function is called after the terminal has updated its screen for the
+// event. Malformed sequences are ignored and never reported.
+//
+// C: GhosttyTerminalSemanticPromptFn
+type SemanticPromptFunc func(t *Terminal, event TerminalSemanticPrompt)
+
+// ResetFunc is called when the running program performs a full terminal
+// reset by sending ESC c (known as RIS). A full reset clears the screen and
+// scrollback, restores every mode to its default, and clears the title and
+// working directory. Use this function to clear any state your application
+// keeps about the program running in the terminal, such as the current
+// command.
+//
+// The function is called after the terminal has reset itself. The title and
+// working directory callbacks, [TitleChangedFn] and [PwdChangedFn], are not
+// called when a reset clears those values, so update anything that displays
+// them here. A full reset also removes any progress report. If a
+// [ProgressReportFn] is set, it is called before this function.
+//
+// This function is not called for a soft reset (CSI ! p), which only
+// restores a few modes. It is also not called for [Terminal.Reset], because
+// the application already knows when it resets the terminal itself.
+//
+// C: GhosttyTerminalResetFn
+type ResetFunc func(t *Terminal)
 
 // TerminalUnknownSequenceTag identifies the kind of unsupported terminal
 // sequence reported by [UnknownSequenceFn]. Additional tags may be added by
@@ -719,6 +859,24 @@ func WithRenderHold(fn RenderHoldFunc) TerminalOption {
 	}
 }
 
+// WithSemanticPrompt sets fn as the function called when the shell reports a
+// step of a command, such as a prompt starting or a command finishing. If fn
+// is nil, these events are ignored. See [SemanticPromptFunc] for details.
+func WithSemanticPrompt(fn SemanticPromptFunc) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.onSemanticPrompt = fn
+	}
+}
+
+// WithReset sets fn as the function called when the running program performs
+// a full terminal reset. If fn is nil, resets are not reported. See
+// [ResetFunc] for details.
+func WithReset(fn ResetFunc) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.onReset = fn
+	}
+}
+
 // WithEnquiry registers an effect handler invoked when the terminal
 // receives an ENQ character (0x05). Return the response bytes; nil
 // or empty means no response.
@@ -890,6 +1048,8 @@ func terminalFromC(cterm C.GhosttyTerminal, cfg TerminalConfig) *Terminal {
 		onDeviceAttributes:    cfg.onDeviceAttributes,
 		onUnknownSequence:     cfg.onUnknownSequence,
 		onRenderHold:          cfg.onRenderHold,
+		onSemanticPrompt:      cfg.onSemanticPrompt,
+		onReset:               cfg.onReset,
 	}
 }
 
