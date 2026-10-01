@@ -12,11 +12,139 @@ static inline GhosttyRenderStateRowSelection init_render_state_row_selection() {
 	GhosttyRenderStateRowSelection sel = GHOSTTY_INIT_SIZED(GhosttyRenderStateRowSelection);
 	return sel;
 }
+
+// render_row_text_result describes the outcome of render_row_text_append. It
+// is returned by value so Go never has to pass a pointer for C to fill in.
+typedef struct {
+	// result is GHOSTTY_SUCCESS when the rest of the row was written.
+	// GHOSTTY_OUT_OF_SPACE means dst filled up first, and the caller should
+	// grow dst and call again starting at next_x. Any other value is an
+	// error from libghostty.
+	GhosttyResult result;
+
+	// len is the number of bytes written to dst.
+	size_t len;
+
+	// next_x is the column to start from on the next call, set only with
+	// GHOSTTY_OUT_OF_SPACE. Every cell before it has been handled.
+	uint16_t next_x;
+
+	// needed is the minimum number of extra bytes dst must have for the next
+	// call to make progress, set only with GHOSTTY_OUT_OF_SPACE.
+	size_t needed;
+} render_row_text_result;
+
+// render_row_text_append writes the text of the current row to dst as UTF-8,
+// starting at column start_x. It loops over the cells in C so that Go makes
+// one call per row instead of two per cell. Each cell's text comes from the
+// GRAPHEMES_UTF8 getter, so encoding matches the per-cell API exactly.
+//
+// The text rules are documented on the Go method, AppendText.
+//
+// Empty cells are held back as a pending run of spaces and written only when
+// a cell with text follows them. This is what drops empty cells at the end
+// of the row. If dst fills up while spaces are pending, next_x points at the
+// first pending space rather than at the cell with text, so the next call
+// writes those spaces again along with the text that follows them.
+//
+// The cells handle is reset to the current row. Its position afterwards is
+// unspecified.
+static inline render_row_text_result render_row_text_append(
+	GhosttyRenderStateRowIterator rows,
+	GhosttyRenderStateRowCells cells,
+	uint16_t start_x,
+	uint8_t* dst,
+	size_t cap
+) {
+	render_row_text_result out = {
+		.result = GHOSTTY_SUCCESS,
+		.next_x = start_x,
+	};
+
+	// Load the current row into the cells handle. libghostty updates the
+	// object the handle points to, so the local copy of the handle is enough.
+	GhosttyResult result = ghostty_render_state_row_get(
+		rows,
+		GHOSTTY_RENDER_STATE_ROW_DATA_CELLS,
+		&cells
+	);
+	if (result != GHOSTTY_SUCCESS) {
+		out.result = result;
+		return out;
+	}
+
+	ghostty_render_state_row_cells_select(cells, start_x);
+
+	// blanks counts the pending empty cells, and blank_x is the column of
+	// the first one.
+	size_t blanks = 0;
+	uint16_t blank_x = start_x;
+	uint16_t x = start_x;
+	do {
+		// Leave room for the pending spaces and ask for the cell's text
+		// right after them. If even the spaces don't fit, pass a NULL
+		// buffer. An empty cell still succeeds with len=0, and a cell with
+		// text fails with GHOSTTY_OUT_OF_SPACE and reports the size it needs.
+		size_t room = cap - out.len;
+		GhosttyBuffer buf = {
+			.ptr = room > blanks ? dst + out.len + blanks : NULL,
+			.cap = room > blanks ? room - blanks : 0,
+			.len = 0,
+		};
+		result = ghostty_render_state_row_cells_get(
+			cells,
+			GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8,
+			&buf
+		);
+		if (result == GHOSTTY_OUT_OF_SPACE) {
+			out.result = result;
+			out.next_x = blanks > 0 ? blank_x : x;
+			out.needed = blanks + buf.len;
+			return out;
+		}
+		if (result != GHOSTTY_SUCCESS) {
+			out.result = result;
+			return out;
+		}
+
+		// An empty cell adds to the pending run of spaces, unless it is a
+		// spacer cell. A spacer cell is either the second half of a wide
+		// character or the leftover cell where a wide character didn't fit
+		// at the end of a row, so it produces no text.
+		if (buf.len == 0) {
+			GhosttyCell raw;
+			GhosttyCellWide wide;
+			ghostty_render_state_row_cells_get(
+				cells,
+				GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW,
+				&raw
+			);
+			ghostty_cell_get(raw, GHOSTTY_CELL_DATA_WIDE, &wide);
+			if (wide == GHOSTTY_CELL_WIDE_SPACER_TAIL ||
+				wide == GHOSTTY_CELL_WIDE_SPACER_HEAD) {
+				continue;
+			}
+
+			if (blanks == 0) blank_x = x;
+			blanks++;
+			continue;
+		}
+
+		// A cell with text was written after the reserved room, so fill
+		// that room with the pending spaces.
+		for (size_t i = 0; i < blanks; i++) dst[out.len + i] = ' ';
+		out.len += blanks + buf.len;
+		blanks = 0;
+	} while (x++, ghostty_render_state_row_cells_next(cells));
+
+	return out;
+}
 */
 import "C"
 
 import (
 	"errors"
+	"slices"
 	"unsafe"
 )
 
@@ -271,6 +399,59 @@ func (ri *RenderStateRowIterator) Cells(rc *RenderStateRowCells) error {
 		C.GHOSTTY_RENDER_STATE_ROW_DATA_CELLS,
 		unsafe.Pointer(&rc.ptr),
 	))
+}
+
+// AppendText appends the text of the current row to dst as UTF-8 and returns
+// the extended slice. Any existing content in dst is kept.
+//
+// The text follows what the row shows on screen:
+//
+//   - Empty cells between characters become spaces.
+//   - Empty cells at the end of the row are left out. Spaces the program
+//     actually printed are text and are kept, even at the end of the row.
+//   - A wide character, such as a CJK character or most emoji, appears once
+//     even though it covers two cells.
+//   - A character made of several code points, such as an emoji with a skin
+//     tone modifier, is kept whole.
+//
+// No newline is added. When the terminal wraps a long line onto several
+// rows, each row is returned separately. To join them, check [Row.Wrap] on
+// the value returned by [RenderStateRowIterator.Raw].
+//
+// rc is working storage. AppendText loads the current row into it and leaves
+// it at an unspecified cell. As with [RenderStateRowIterator.Cells], one rc
+// can be reused for every row.
+//
+// AppendText is much faster than calling [RenderStateRowCells.AppendGraphemes]
+// on each cell, because it reads the whole row in one call into libghostty.
+// To avoid allocations, reuse one buffer across rows by passing buf[:0].
+func (ri *RenderStateRowIterator) AppendText(dst []byte, rc *RenderStateRowCells) ([]byte, error) {
+	var x C.uint16_t
+	for {
+		oldLen := len(dst)
+		available := cap(dst) - oldLen
+		var ptr *C.uint8_t
+		if available > 0 {
+			buf := dst[:cap(dst)]
+			ptr = (*C.uint8_t)(unsafe.Pointer(&buf[oldLen]))
+		}
+
+		result := C.render_row_text_append(ri.ptr, rc.ptr, x, ptr, C.size_t(available))
+		dst = dst[:oldLen+int(result.len)]
+		switch result.result {
+		case C.GHOSTTY_SUCCESS:
+			return dst, nil
+
+		case C.GHOSTTY_OUT_OF_SPACE:
+			// Grow dst so the next cell fits and continue from where the C
+			// loop stopped.
+			x = result.next_x
+			dst = slices.Grow(dst, int(result.needed))
+
+		default:
+			return dst, resultError(result.result)
+		}
+	}
 }
 
 // CellsRaw returns a borrowed, contiguous view of the packed cell values in

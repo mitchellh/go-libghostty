@@ -413,3 +413,124 @@ func TestRenderStateOverscanAndRowIdentity(t *testing.T) {
 	}
 	read(RenderStateOverscan{})
 }
+
+// rowTexts writes input to a terminal of the given size and returns the
+// result of AppendText for every row. Each row is appended to the same dst,
+// so a dst with little or no capacity exercises the growth path on every
+// row, and a dst with existing content checks that it is kept.
+func rowTexts(t *testing.T, cols, rows uint16, input string, dst []byte) []string {
+	t.Helper()
+
+	term, err := NewTerminal(WithSize(cols, rows))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.VTWrite([]byte(input))
+
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+	if err := rs.Update(term); err != nil {
+		t.Fatal(err)
+	}
+
+	ri, err := NewRenderStateRowIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ri.Close()
+	if err := rs.RowIterator(ri); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := NewRenderStateRowCells()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+
+	var texts []string
+	for ri.Next() {
+		text, err := ri.AppendText(dst, rc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		texts = append(texts, string(text))
+	}
+	return texts
+}
+
+func TestRenderStateRowIteratorAppendText(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "plain",
+			input: "hello world\r\nsecond",
+			want:  []string{"hello world", "second", ""},
+		},
+		{
+			// Moving the cursor forward skips cells without writing them.
+			// Those empty cells become spaces.
+			name:  "empty cells between text",
+			input: "a\x1b[5Gb",
+			want:  []string{"a   b", "", ""},
+		},
+		{
+			// Spaces the program printed are text, so they are kept at the
+			// end of the row. Only empty cells are left out.
+			name:  "printed trailing spaces",
+			input: "a  ",
+			want:  []string{"a  ", "", ""},
+		},
+		{
+			// Each wide character covers two cells but appears once.
+			name:  "wide characters",
+			input: "日本語x",
+			want:  []string{"日本語x", "", ""},
+		},
+		{
+			// Characters made of several code points are kept whole.
+			name:  "multiple code points",
+			input: "e\u0301 👩🏽‍💻!",
+			want:  []string{"e\u0301 👩🏽‍💻!", "", ""},
+		},
+		{
+			// A wide character that doesn't fit in the last column moves to
+			// the next row. The cell it leaves behind produces no text.
+			name:  "wide character at end of row",
+			input: "abcdefghijk日",
+			want:  []string{"abcdefghijk", "日", ""},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Small capacities force AppendText to grow dst partway through
+			// a row, at different points for each capacity.
+			for _, initial := range []int{0, 1, 3, 256} {
+				got := rowTexts(t, 12, 3, tc.input, make([]byte, 0, initial))
+				if len(got) != len(tc.want) {
+					t.Fatalf("cap %d: expected %d rows, got %d", initial, len(tc.want), len(got))
+				}
+				for i := range got {
+					if got[i] != tc.want[i] {
+						t.Fatalf("cap %d row %d: expected %q, got %q", initial, i, tc.want[i], got[i])
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestRenderStateRowIteratorAppendTextKeepsPrefix(t *testing.T) {
+	got := rowTexts(t, 12, 1, "abc", []byte("> "))
+	if got[0] != "> abc" {
+		t.Fatalf("expected %q, got %q", "> abc", got[0])
+	}
+}
