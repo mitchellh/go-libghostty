@@ -1,6 +1,9 @@
 package libghostty
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTerminalColsRows(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
@@ -467,5 +470,82 @@ func TestTerminalMouseShape(t *testing.T) {
 		if got, err := term.MouseShape(); err != nil || got != tc.want {
 			t.Fatalf("%q: got %v, %v; want %v", tc.input, got, err, tc.want)
 		}
+	}
+}
+
+func TestTerminalMemoryUsage(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24), WithMaxScrollbackLines(100000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	usage, err := term.MemoryUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Primary.Pages == 0 {
+		t.Fatal("expected primary screen to have pages")
+	}
+	if usage.Primary.ResidentBytes == 0 {
+		t.Fatal("expected primary screen to have resident bytes")
+	}
+	if usage.Primary.VirtualBytes < usage.Primary.ResidentBytes {
+		t.Fatalf("expected virtual bytes %d >= resident bytes %d",
+			usage.Primary.VirtualBytes, usage.Primary.ResidentBytes)
+	}
+	if usage.Alternate != (ScreenMemoryUsage{}) {
+		t.Fatalf("expected empty alternate screen usage, got %+v", usage.Alternate)
+	}
+
+	// Switching to the alternate screen allocates its pages.
+	term.VTWrite([]byte("\x1b[?1049h"))
+	usage, err = term.MemoryUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Alternate.Pages == 0 {
+		t.Fatal("expected alternate screen to have pages")
+	}
+	total := usage.Total()
+	if total.Pages != usage.Primary.Pages+usage.Alternate.Pages {
+		t.Fatalf("unexpected total pages %d", total.Pages)
+	}
+	if total.ResidentBytes != usage.Primary.ResidentBytes+usage.Alternate.ResidentBytes {
+		t.Fatalf("unexpected total resident bytes %d", total.ResidentBytes)
+	}
+	term.VTWrite([]byte("\x1b[?1049l"))
+
+	// Fill enough scrollback to span many pages, then compress it.
+	line := []byte(strings.Repeat("x", 79) + "\r\n")
+	for range 20000 {
+		term.VTWrite(line)
+	}
+	before, err := term.MemoryUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := term.Compress(TerminalCompressionFull); err != nil {
+		t.Fatal(err)
+	}
+	after, err := term.MemoryUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.CompressionSupported {
+		if after.Primary.CompressedPages != 0 || after.Primary.CompressedBytes != 0 {
+			t.Fatalf("expected no compressed pages when unsupported, got %+v", after.Primary)
+		}
+		return
+	}
+	if after.Primary.CompressedPages == 0 {
+		t.Fatal("expected compressed pages after full compression")
+	}
+	if after.Primary.CompressedBytes == 0 {
+		t.Fatal("expected compressed bytes after full compression")
+	}
+	if after.Primary.ResidentBytes >= before.Primary.ResidentBytes {
+		t.Fatalf("expected resident bytes to drop: before %d, after %d",
+			before.Primary.ResidentBytes, after.Primary.ResidentBytes)
 	}
 }

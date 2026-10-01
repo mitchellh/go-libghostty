@@ -5,6 +5,12 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
+
+// Helper to create a properly initialized GhosttyTerminalMemoryUsage (sized struct).
+static inline GhosttyTerminalMemoryUsage init_terminal_memory_usage() {
+	GhosttyTerminalMemoryUsage u = GHOSTTY_INIT_SIZED(GhosttyTerminalMemoryUsage);
+	return u;
+}
 */
 import "C"
 
@@ -180,6 +186,10 @@ const (
 	// TerminalDataMouseShape is the mouse pointer shape requested through
 	// OSC 22 (GhosttyMouseShape). See [Terminal.MouseShape].
 	TerminalDataMouseShape TerminalData = C.GHOSTTY_TERMINAL_DATA_MOUSE_SHAPE
+
+	// TerminalDataMemoryUsage is the memory held by the terminal
+	// (GhosttyTerminalMemoryUsage). See [Terminal.MemoryUsage].
+	TerminalDataMemoryUsage TerminalData = C.GHOSTTY_TERMINAL_DATA_MEMORY_USAGE
 )
 
 // ActiveScreen returns which screen buffer is currently active.
@@ -451,6 +461,38 @@ func (t *Terminal) KittyImageStorageLimit() (uint64, error) {
 		return 0, err
 	}
 	return uint64(v), nil
+}
+
+// MemoryUsage reports how much memory the terminal holds. See
+// [MemoryUsage] for what each figure means.
+//
+// MemoryUsage never decompresses scrollback, but it does visit every page,
+// so its cost grows with the amount of scrollback. Call it periodically,
+// for example on a timer, rather than after every write.
+func (t *Terminal) MemoryUsage() (MemoryUsage, error) {
+	v := C.init_terminal_memory_usage()
+	if err := resultError(C.ghostty_terminal_get(t.ptr, C.GHOSTTY_TERMINAL_DATA_MEMORY_USAGE, unsafe.Pointer(&v))); err != nil {
+		return MemoryUsage{}, err
+	}
+	return MemoryUsage{
+		CompressionSupported: bool(v.compression_supported),
+		Primary: ScreenMemoryUsage{
+			Pages:           uint64(v.primary_pages),
+			VirtualBytes:    uint64(v.primary_virtual_bytes),
+			ResidentBytes:   uint64(v.primary_resident_bytes),
+			CompressedPages: uint64(v.primary_compressed_pages),
+			CompressedBytes: uint64(v.primary_compressed_bytes),
+			ImageBytes:      uint64(v.primary_image_bytes),
+		},
+		Alternate: ScreenMemoryUsage{
+			Pages:           uint64(v.alternate_pages),
+			VirtualBytes:    uint64(v.alternate_virtual_bytes),
+			ResidentBytes:   uint64(v.alternate_resident_bytes),
+			CompressedPages: uint64(v.alternate_compressed_pages),
+			CompressedBytes: uint64(v.alternate_compressed_bytes),
+			ImageBytes:      uint64(v.alternate_image_bytes),
+		},
+	}, nil
 }
 
 // Mode returns the current value of a terminal mode.

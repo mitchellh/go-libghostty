@@ -140,6 +140,11 @@ const (
 	// SnapshotDecoderOptionRetainContinuation controls whether the returned
 	// terminal retains the decoded continuation (bool).
 	SnapshotDecoderOptionRetainContinuation SnapshotDecoderOption = C.GHOSTTY_SNAPSHOT_DECODER_OPT_RETAIN_CONTINUATION
+
+	// SnapshotDecoderOptionCompressHistory controls whether the decoder
+	// compresses scrollback as it restores it (bool). See
+	// [SnapshotDecoder.SetCompressHistory].
+	SnapshotDecoderOptionCompressHistory SnapshotDecoderOption = C.GHOSTTY_SNAPSHOT_DECODER_OPT_COMPRESS_HISTORY
 )
 
 // SnapshotDecoderData identifies a data field available from a
@@ -182,6 +187,11 @@ const (
 	// SnapshotDecoderDataRetainContinuation reports whether continuation
 	// tracking is retained on returned terminals (bool).
 	SnapshotDecoderDataRetainContinuation SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_RETAIN_CONTINUATION
+
+	// SnapshotDecoderDataCompressHistory reports whether the decoder
+	// compresses scrollback as it restores it (bool). See
+	// [SnapshotDecoder.SetCompressHistory].
+	SnapshotDecoderDataCompressHistory SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_COMPRESS_HISTORY
 )
 
 // SnapshotDecoder incrementally decodes and validates one terminal
@@ -422,6 +432,38 @@ func (d *SnapshotDecoder) SetRetainContinuation(retain bool) error {
 	))
 }
 
+// SetCompressHistory controls whether the decoder compresses scrollback as
+// it restores it. It is off by default and may only be called before
+// decoding begins.
+//
+// Without this option, a restored terminal keeps all of its scrollback
+// uncompressed, even if the terminal that produced the snapshot had
+// compressed it. The scrollback stays that size until the application calls
+// [Terminal.Compress]. For a terminal with a lot of scrollback, that can
+// use many times more memory than the original terminal did.
+//
+// With this option, the decoder compresses each page of scrollback right
+// after restoring it, so at most one uncompressed page is held at a time.
+// The result is the same as decoding normally and then calling
+// [Terminal.Compress] with [TerminalCompressionFull], but without the
+// temporary jump in memory use. A page that is on screen when it is
+// restored is left uncompressed. Compressed scrollback is decompressed
+// automatically when it is needed, for example when the user scrolls or
+// searches.
+//
+// This option only affects how the restored terminal stores its scrollback
+// in memory. It works with any snapshot. On platforms that do not support
+// scrollback compression, it is accepted and has no effect.
+// C: ghostty_snapshot_decoder_set
+func (d *SnapshotDecoder) SetCompressHistory(compress bool) error {
+	v := C.bool(compress)
+	return resultError(C.ghostty_snapshot_decoder_set(
+		d.ptr,
+		C.GHOSTTY_SNAPSHOT_DECODER_OPT_COMPRESS_HISTORY,
+		unsafe.Pointer(&v),
+	))
+}
+
 // Ready decodes and validates the renderable snapshot prefix. The
 // returned terminal is caller-owned and immediately usable; older history can
 // then be restored one page at a time with [SnapshotDecoder.Next].
@@ -437,6 +479,9 @@ func (d *SnapshotDecoder) Ready() (*Terminal, error) {
 // Next decodes and validates one history page. It returns true after a
 // page is consumed. It returns false with no error after FINISH is validated,
 // including on repeated calls after FINISH.
+//
+// If [SnapshotDecoder.SetCompressHistory] is on, Next compresses the page
+// before returning, unless the page is on screen.
 // C: ghostty_snapshot_decoder_next
 func (d *SnapshotDecoder) Next() (bool, error) {
 	result := C.ghostty_snapshot_decoder_next(d.ptr)
@@ -534,6 +579,19 @@ func (d *SnapshotDecoder) MaxContinuationBytes() (uint, error) {
 		return 0, err
 	}
 	return uint(value), nil
+}
+
+// CompressHistory reports whether the decoder compresses scrollback as it
+// restores it. See [SnapshotDecoder.SetCompressHistory].
+func (d *SnapshotDecoder) CompressHistory() (bool, error) {
+	var value C.bool
+	if err := d.Get(
+		SnapshotDecoderDataCompressHistory,
+		unsafe.Pointer(&value),
+	); err != nil {
+		return false, err
+	}
+	return value != C.bool(false), nil
 }
 
 // RetainContinuation reports whether decoded continuation tracking will be

@@ -1088,8 +1088,17 @@ func (t *Terminal) Reset() {
 // cellHeightPx specify the pixel dimensions of a single cell, used
 // for image protocols and size reports.
 //
-// If synchronized output is active, Resize ends the render hold and calls
-// the [RenderHoldFunc] with held false before returning.
+// When wraparound mode is enabled, text on the primary screen is rewrapped
+// to fit the new width. Text on the alternate screen is never rewrapped.
+//
+// Resize also turns off [ModeSyncOutput] so the resized screen is shown
+// right away. If synchronized output was on, Resize ends the render hold
+// and calls the [RenderHoldFunc] with held false before returning. If
+// [ModeInBandResize] is on, Resize sends the new size to the program
+// running in the terminal.
+//
+// Calling Resize with the current cols and rows leaves the screen contents
+// unchanged, but everything else described above still happens.
 func (t *Terminal) Resize(cols, rows uint16, cellWidthPx, cellHeightPx uint32) error {
 	return resultError(C.ghostty_terminal_resize(
 		t.ptr,
@@ -1302,6 +1311,98 @@ type Scrollbar struct {
 
 	// Len is the length of the visible area in rows.
 	Len uint64
+}
+
+// MemoryUsage describes how much memory a terminal holds. Use
+// [Terminal.MemoryUsage] to read it.
+//
+// Applications that host many terminals can use it to stay within a memory
+// budget, for example by compressing or closing the terminals that hold
+// the most memory first.
+//
+// Most of a terminal's memory goes to its screen contents and scrollback.
+// These are stored in fixed-size blocks called pages. Each page has two
+// sizes. Its resident size is the physical memory it uses right now, and
+// is the number to budget against. Its virtual size is the address space
+// reserved for it. Compressing a page lowers its resident size but not its
+// virtual size, because the space stays reserved so the page can be
+// decompressed later.
+//
+// Pages hold everything the terminal displays, including colors, styles
+// and hyperlinks, so those are already counted in the page figures. Kitty
+// graphics images are stored outside of pages and are counted separately
+// in [ScreenMemoryUsage.ImageBytes]. Small amounts of memory outside of
+// pages, such as the window title, are not counted at all.
+//
+// On macOS, the operating system takes back memory freed by compression
+// only when something else needs it. Until then, the memory use the
+// operating system reports for your process can be higher than the
+// resident figures here.
+//
+// C: GhosttyTerminalMemoryUsage
+type MemoryUsage struct {
+	// CompressionSupported reports whether compressing scrollback can free
+	// memory on this platform. When it is false, [Terminal.Compress]
+	// returns [TerminalCompressionUnsupported] and the compressed figures
+	// are always zero. Closing terminals is then the only way to reduce
+	// their memory.
+	CompressionSupported bool
+
+	// Primary is the memory held by the primary screen. The primary screen
+	// holds normal shell output and all of the scrollback.
+	Primary ScreenMemoryUsage
+
+	// Alternate is the memory held by the alternate screen. Full-screen
+	// programs such as text editors draw on the alternate screen. All of
+	// its figures are zero until a program first switches to it.
+	Alternate ScreenMemoryUsage
+}
+
+// Total returns the memory held by the primary and alternate screens
+// added together.
+func (u MemoryUsage) Total() ScreenMemoryUsage {
+	return ScreenMemoryUsage{
+		Pages:           u.Primary.Pages + u.Alternate.Pages,
+		VirtualBytes:    u.Primary.VirtualBytes + u.Alternate.VirtualBytes,
+		ResidentBytes:   u.Primary.ResidentBytes + u.Alternate.ResidentBytes,
+		CompressedPages: u.Primary.CompressedPages + u.Alternate.CompressedPages,
+		CompressedBytes: u.Primary.CompressedBytes + u.Alternate.CompressedBytes,
+		ImageBytes:      u.Primary.ImageBytes + u.Alternate.ImageBytes,
+	}
+}
+
+// ScreenMemoryUsage describes how much memory a single terminal screen
+// holds. See [MemoryUsage] for an explanation of pages and of resident
+// and virtual sizes.
+//
+// C: the primary_ and alternate_ fields of GhosttyTerminalMemoryUsage
+type ScreenMemoryUsage struct {
+	// Pages is the number of pages the screen uses, including compressed
+	// pages.
+	Pages uint64
+
+	// VirtualBytes is the address space, in bytes, reserved for the
+	// screen's pages. It includes compressed pages and spare pages kept for
+	// reuse, and is never less than ResidentBytes.
+	VirtualBytes uint64
+
+	// ResidentBytes is the physical memory, in bytes, used by the screen's
+	// pages. A compressed page counts only its compressed size. This is the
+	// figure to use for memory budgets.
+	ResidentBytes uint64
+
+	// CompressedPages is the number of the screen's pages that are
+	// compressed.
+	CompressedPages uint64
+
+	// CompressedBytes is the size, in bytes, of the screen's compressed
+	// pages. It is already included in ResidentBytes.
+	CompressedBytes uint64
+
+	// ImageBytes is the size, in bytes, of the Kitty graphics images stored
+	// for the screen. It is not included in ResidentBytes. It is always
+	// zero when libghostty-vt is built without Kitty graphics support.
+	ImageBytes uint64
 }
 
 // KittyGraphics returns the Kitty graphics image storage for the

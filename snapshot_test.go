@@ -328,6 +328,11 @@ func TestSnapshotIncrementalDecode(t *testing.T) {
 	} else {
 		assertResultError(t, err, ResultInvalidValue)
 	}
+	if err := decoder.SetCompressHistory(true); err == nil {
+		t.Fatal("expected lifecycle error when compressing history after READY")
+	} else {
+		assertResultError(t, err, ResultInvalidValue)
+	}
 
 	pages := 0
 	restoredRows := uint(0)
@@ -390,6 +395,70 @@ func TestSnapshotIncrementalDecode(t *testing.T) {
 	}
 	if offset != uint(len(snapshot)) {
 		t.Fatalf("expected FINISH offset %d, got %d", len(snapshot), offset)
+	}
+}
+
+func TestSnapshotDecodeCompressesHistory(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24), WithMaxScrollbackLines(100000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	line := []byte(strings.Repeat("x", 79) + "\r\n")
+	for range 20000 {
+		term.VTWrite(line)
+	}
+	snapshot, err := term.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decoder, err := NewSnapshotDecoderBytes(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoder.Close()
+
+	compress, err := decoder.CompressHistory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compress {
+		t.Fatal("expected history compression to be disabled by default")
+	}
+	if err := decoder.SetCompressHistory(true); err != nil {
+		t.Fatal(err)
+	}
+	compress, err = decoder.CompressHistory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !compress {
+		t.Fatal("expected history compression to be enabled")
+	}
+
+	restored, err := decoder.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+
+	// The option remains readable after decoding finishes.
+	compress, err = decoder.CompressHistory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !compress {
+		t.Fatal("expected history compression to remain enabled")
+	}
+
+	usage, err := restored.MemoryUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.CompressionSupported && usage.Primary.CompressedPages == 0 {
+		t.Fatal("expected restored history to be compressed")
 	}
 }
 
