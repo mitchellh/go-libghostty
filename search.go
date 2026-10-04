@@ -7,7 +7,6 @@ import "C"
 
 import (
 	"errors"
-	"runtime"
 	"unsafe"
 )
 
@@ -196,29 +195,20 @@ func (s *Search) GetMulti(keys []SearchData, values []unsafe.Pointer) (written i
 		return 0, nil
 	}
 
-	cKeys := make([]C.GhosttySearchData, len(keys))
-	for i, key := range keys {
-		cKeys[i] = C.GhosttySearchData(key)
+	// Copy the keys and output pointers into C memory. See get_multi.go.
+	var args getMultiArgs
+	cKeys, err := allocWithKeys[C.GhosttySearchData](&args, keys, values)
+	if err != nil {
+		return 0, err
 	}
-	// The Go output pointers are nested inside a C-allocated array, so pin them
-	// explicitly for the duration of the call.
-	var pinner runtime.Pinner
-	for _, value := range values {
-		if value != nil {
-			pinner.Pin(value)
-		}
-	}
-	defer pinner.Unpin()
-
-	cValues, cValuesSize := cValuesArray(values)
-	defer Free(unsafe.Pointer(cValues), cValuesSize)
+	defer args.free()
 
 	var cWritten C.size_t
 	err = resultError(C.ghostty_search_get_multi(
 		s.ptr,
-		C.size_t(len(cKeys)),
-		(*C.GhosttySearchData)(unsafe.Pointer(&cKeys[0])),
-		cValues,
+		C.size_t(len(keys)),
+		cKeys,
+		args.values,
 		&cWritten,
 	))
 	return int(cWritten), err

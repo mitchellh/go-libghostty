@@ -493,19 +493,20 @@ func (g *SelectionGesture) GetMulti(t *Terminal, keys []SelectionGestureData, va
 		return 0, nil
 	}
 
-	cKeys := make([]C.GhosttySelectionGestureData, len(keys))
-	for i, key := range keys {
-		cKeys[i] = C.GhosttySelectionGestureData(key)
+	// Copy the keys and output pointers into C memory. See get_multi.go.
+	var args getMultiArgs
+	cKeys, err := allocWithKeys[C.GhosttySelectionGestureData](&args, keys, values)
+	if err != nil {
+		return 0, err
 	}
-	cVals, cValsSize := cValuesArray(values)
-	defer Free(unsafe.Pointer(cVals), cValsSize)
+	defer args.free()
 	var cWritten C.size_t
 	err = resultError(C.ghostty_selection_gesture_get_multi(
 		g.ptr,
 		t.ptr,
 		C.size_t(len(keys)),
-		(*C.GhosttySelectionGestureData)(unsafe.Pointer(&cKeys[0])),
-		cVals,
+		cKeys,
+		args.values,
 		&cWritten,
 	))
 	return int(cWritten), err

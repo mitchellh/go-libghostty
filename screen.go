@@ -245,7 +245,7 @@ const (
 )
 
 // GetMulti queries multiple cell data fields in a single cgo call.
-// This is a low-level function; prefer the typed getters (Codepoint,
+// This is a low-level function. Prefer the typed getters (Codepoint,
 // Wide, HasText, etc.) for normal use. GetMulti is useful when you
 // need many fields at once and want to avoid per-field cgo overhead.
 //
@@ -253,14 +253,20 @@ const (
 // element in values must be an unsafe.Pointer to a variable whose type
 // matches the "Output type" documented for that key in the upstream C
 // header (ghostty/vt/screen.h, GhosttyCellData enum).
+// Use a Go type with the same size as the C type, such as uint32
+// for uint32_t, bool for bool, and int32 for an enum.
+//
+// GetMulti returns an error if keys and values have different lengths
+// or if a key cannot be read. In the second case, values for the keys
+// before it may already have been written.
 //
 // Example:
 //
-//	var cp C.uint32_t
-//	var wide C.GhosttyCellWide
+//	var cp uint32
+//	var hasText bool
 //	err := cell.GetMulti(
-//		[]CellData{CellDataCodepoint, CellDataWide},
-//		[]unsafe.Pointer{unsafe.Pointer(&cp), unsafe.Pointer(&wide)},
+//		[]CellData{CellDataCodepoint, CellDataHasText},
+//		[]unsafe.Pointer{unsafe.Pointer(&cp), unsafe.Pointer(&hasText)},
 //	)
 //
 // C: ghostty_cell_get_multi
@@ -271,14 +277,18 @@ func (c *Cell) GetMulti(keys []CellData, values []unsafe.Pointer) error {
 	if len(keys) == 0 {
 		return nil
 	}
-	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
-	cVals, cValsSize := cValuesArray(values)
-	defer Free(unsafe.Pointer(cVals), cValsSize)
+	// Copy the keys and output pointers into C memory. See get_multi.go.
+	var args getMultiArgs
+	cKeys, err := allocWithKeys[C.GhosttyCellData](&args, keys, values)
+	if err != nil {
+		return err
+	}
+	defer args.free()
 	return resultError(C.ghostty_cell_get_multi(
 		c.c,
 		C.size_t(len(keys)),
-		(*C.GhosttyCellData)(unsafe.Pointer(&keys[0])),
-		cVals,
+		cKeys,
+		args.values,
 		nil,
 	))
 }
@@ -386,7 +396,7 @@ func (c *Cell) ColorRGB() (ColorRGB, error) {
 }
 
 // GetMulti queries multiple row data fields in a single cgo call.
-// This is a low-level function; prefer the typed getters (Wrap,
+// This is a low-level function. Prefer the typed getters (Wrap,
 // Grapheme, Styled, Semantic, etc.) for normal use. GetMulti is
 // useful when you need many fields at once and want to avoid
 // per-field cgo overhead.
@@ -395,10 +405,16 @@ func (c *Cell) ColorRGB() (ColorRGB, error) {
 // element in values must be an unsafe.Pointer to a variable whose type
 // matches the "Output type" documented for that key in the upstream C
 // header (ghostty/vt/screen.h, GhosttyRowData enum).
+// Use a Go type with the same size as the C type, such as uint32
+// for uint32_t, bool for bool, and int32 for an enum.
+//
+// GetMulti returns an error if keys and values have different lengths
+// or if a key cannot be read. In the second case, values for the keys
+// before it may already have been written.
 //
 // Example:
 //
-//	var wrap, styled C.bool
+//	var wrap, styled bool
 //	err := row.GetMulti(
 //		[]RowData{RowDataWrap, RowDataStyled},
 //		[]unsafe.Pointer{unsafe.Pointer(&wrap), unsafe.Pointer(&styled)},
@@ -412,14 +428,18 @@ func (r *Row) GetMulti(keys []RowData, values []unsafe.Pointer) error {
 	if len(keys) == 0 {
 		return nil
 	}
-	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
-	cVals, cValsSize := cValuesArray(values)
-	defer Free(unsafe.Pointer(cVals), cValsSize)
+	// Copy the keys and output pointers into C memory. See get_multi.go.
+	var args getMultiArgs
+	cKeys, err := allocWithKeys[C.GhosttyRowData](&args, keys, values)
+	if err != nil {
+		return err
+	}
+	defer args.free()
 	return resultError(C.ghostty_row_get_multi(
 		r.c,
 		C.size_t(len(keys)),
-		(*C.GhosttyRowData)(unsafe.Pointer(&keys[0])),
-		cVals,
+		cKeys,
+		args.values,
 		nil,
 	))
 }

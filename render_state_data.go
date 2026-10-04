@@ -233,7 +233,7 @@ func (rs *RenderState) Cursor() (*RenderStateCursor, error) {
 }
 
 // GetMulti queries multiple render state data fields in a single cgo
-// call. This is a low-level function; prefer the typed getters (Cols,
+// call. This is a low-level function. Prefer the typed getters (Cols,
 // Rows, CursorVisible, etc.) for normal use. GetMulti is useful when
 // you need many fields at once and want to avoid per-field cgo overhead.
 //
@@ -241,10 +241,16 @@ func (rs *RenderState) Cursor() (*RenderStateCursor, error) {
 // element in values must be an unsafe.Pointer to a variable whose type
 // matches the "Output type" documented for that key in the upstream C
 // header (ghostty/vt/render.h, GhosttyRenderStateData enum).
+// Use a Go type with the same size as the C type, such as uint32
+// for uint32_t, bool for bool, and int32 for an enum.
+//
+// GetMulti returns an error if keys and values have different lengths
+// or if a key cannot be read. In the second case, values for the keys
+// before it may already have been written.
 //
 // Example:
 //
-//	var cols, rows C.uint16_t
+//	var cols, rows uint16
 //	err := rs.GetMulti(
 //		[]RenderStateData{RenderStateDataCols, RenderStateDataRows},
 //		[]unsafe.Pointer{unsafe.Pointer(&cols), unsafe.Pointer(&rows)},
@@ -258,14 +264,18 @@ func (rs *RenderState) GetMulti(keys []RenderStateData, values []unsafe.Pointer)
 	if len(keys) == 0 {
 		return nil
 	}
-	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
-	cVals, cValsSize := cValuesArray(values)
-	defer Free(unsafe.Pointer(cVals), cValsSize)
+	// Copy the keys and output pointers into C memory. See get_multi.go.
+	var args getMultiArgs
+	cKeys, err := allocWithKeys[C.GhosttyRenderStateData](&args, keys, values)
+	if err != nil {
+		return err
+	}
+	defer args.free()
 	return resultError(C.ghostty_render_state_get_multi(
 		rs.ptr,
 		C.size_t(len(keys)),
-		(*C.GhosttyRenderStateData)(unsafe.Pointer(&keys[0])),
-		cVals,
+		cKeys,
+		args.values,
 		nil,
 	))
 }

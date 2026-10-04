@@ -271,7 +271,7 @@ func (rc *RenderStateRowCells) Select(x uint16) error {
 }
 
 // GetMulti queries multiple render-state cell data fields in a single
-// cgo call. This is a low-level function; prefer the typed getters
+// cgo call. This is a low-level function. Prefer the typed getters
 // (Raw, Style, Graphemes, BgColor, FgColor) for normal use. GetMulti
 // is useful when you need many fields at once and want to avoid
 // per-field cgo overhead.
@@ -280,14 +280,20 @@ func (rc *RenderStateRowCells) Select(x uint16) error {
 // element in values must be an unsafe.Pointer to a variable whose type
 // matches the "Output type" documented for that key in the upstream C
 // header (ghostty/vt/render.h, GhosttyRenderStateRowCellsData enum).
+// Use a Go type with the same size as the C type, such as uint32
+// for uint32_t, bool for bool, and int32 for an enum.
+//
+// GetMulti returns an error if keys and values have different lengths
+// or if a key cannot be read. In the second case, values for the keys
+// before it may already have been written.
 //
 // Example:
 //
-//	var raw C.GhosttyCell
-//	var graphemesLen C.uint32_t
+//	var graphemesLen uint32
+//	var hasStyling bool
 //	err := rc.GetMulti(
-//		[]RenderStateRowCellsData{RenderStateRowCellsDataRaw, RenderStateRowCellsDataGraphemesLen},
-//		[]unsafe.Pointer{unsafe.Pointer(&raw), unsafe.Pointer(&graphemesLen)},
+//		[]RenderStateRowCellsData{RenderStateRowCellsDataGraphemesLen, RenderStateRowCellsDataHasStyling},
+//		[]unsafe.Pointer{unsafe.Pointer(&graphemesLen), unsafe.Pointer(&hasStyling)},
 //	)
 //
 // C: ghostty_render_state_row_cells_get_multi
@@ -298,14 +304,18 @@ func (rc *RenderStateRowCells) GetMulti(keys []RenderStateRowCellsData, values [
 	if len(keys) == 0 {
 		return nil
 	}
-	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
-	cVals, cValsSize := cValuesArray(values)
-	defer Free(unsafe.Pointer(cVals), cValsSize)
+	// Copy the keys and output pointers into C memory. See get_multi.go.
+	var args getMultiArgs
+	cKeys, err := allocWithKeys[C.GhosttyRenderStateRowCellsData](&args, keys, values)
+	if err != nil {
+		return err
+	}
+	defer args.free()
 	return resultError(C.ghostty_render_state_row_cells_get_multi(
 		rc.ptr,
 		C.size_t(len(keys)),
-		(*C.GhosttyRenderStateRowCellsData)(unsafe.Pointer(&keys[0])),
-		cVals,
+		cKeys,
+		args.values,
 		nil,
 	))
 }

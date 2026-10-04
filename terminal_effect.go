@@ -754,7 +754,8 @@ func goDeviceAttributesTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer, 
 // effectString copies data into C memory allocated via the libghostty
 // allocator, updates effectBuf/effectBufLen, and returns a
 // GhosttyString pointing to it. The previous effectBuf is freed.
-// Returns a zero-length GhosttyString if data is empty.
+// Returns a zero-length GhosttyString if data is empty or the
+// allocation fails.
 func (t *Terminal) effectString(data []byte) C.GhosttyString {
 	if t.effectBuf != nil {
 		Free(t.effectBuf, t.effectBufLen)
@@ -768,6 +769,13 @@ func (t *Terminal) effectString(data []byte) C.GhosttyString {
 
 	n := uintptr(len(data))
 	cmem := Alloc(n)
+	if cmem == nil {
+		// The callers are C callbacks that can only return a string,
+		// so there is no way to report an error. An empty string
+		// sends no reply, which is better than crashing when memory
+		// runs out.
+		return C.GhosttyString{}
+	}
 	copy(unsafe.Slice((*byte)(cmem), n), data)
 	t.effectBuf = cmem
 	t.effectBufLen = n

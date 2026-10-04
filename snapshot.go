@@ -537,31 +537,19 @@ func (d *SnapshotDecoder) GetMulti(keys []SnapshotDecoderData, values []unsafe.P
 		return 0, nil
 	}
 
-	cKeys := make([]C.GhosttySnapshotDecoderData, len(keys))
-	for i, key := range keys {
-		cKeys[i] = C.GhosttySnapshotDecoderData(key)
+	// Copy the keys and output pointers into C memory. See get_multi.go.
+	var args getMultiArgs
+	cKeys, err := allocWithKeys[C.GhosttySnapshotDecoderData](&args, keys, values)
+	if err != nil {
+		return 0, err
 	}
-
-	// cValuesArray places the output pointers in C-owned memory for the
-	// duration of the call. Explicitly pin every Go target before doing so;
-	// direct cgo arguments are pinned automatically, but nested pointers in a
-	// C array are not. Pin is a no-op for targets already allocated by C.
-	var pinner runtime.Pinner
-	for _, value := range values {
-		if value != nil {
-			pinner.Pin(value)
-		}
-	}
-	defer pinner.Unpin()
-
-	cValues, cValuesSize := cValuesArray(values)
-	defer Free(unsafe.Pointer(cValues), cValuesSize)
+	defer args.free()
 	var cWritten C.size_t
 	err = resultError(C.ghostty_snapshot_decoder_get_multi(
 		d.ptr,
 		C.size_t(len(keys)),
-		&cKeys[0],
-		cValues,
+		cKeys,
+		args.values,
 		&cWritten,
 	))
 	return int(cWritten), err

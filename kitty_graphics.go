@@ -478,7 +478,7 @@ func (img *KittyGraphicsImage) Height() (uint32, error) {
 }
 
 // GetMulti queries multiple image data fields in a single cgo call.
-// This is a low-level function; prefer the typed getters (ID, Width,
+// This is a low-level function. Prefer the typed getters (ID, Width,
 // Height, Format, etc.) or Info() for normal use. GetMulti is useful
 // when you need a custom subset of fields and want to avoid per-field
 // cgo overhead.
@@ -488,10 +488,16 @@ func (img *KittyGraphicsImage) Height() (uint32, error) {
 // matches the "Output type" documented for that key in the upstream C
 // header (ghostty/vt/kitty_graphics.h, GhosttyKittyGraphicsImageData
 // enum).
+// Use a Go type with the same size as the C type, such as uint32
+// for uint32_t, bool for bool, and int32 for an enum.
+//
+// GetMulti returns an error if keys and values have different lengths
+// or if a key cannot be read. In the second case, values for the keys
+// before it may already have been written.
 //
 // Example:
 //
-//	var w, h C.uint32_t
+//	var w, h uint32
 //	err := img.GetMulti(
 //		[]KittyGraphicsImageData{KittyGraphicsImageDataWidth, KittyGraphicsImageDataHeight},
 //		[]unsafe.Pointer{unsafe.Pointer(&w), unsafe.Pointer(&h)},
@@ -505,14 +511,18 @@ func (img *KittyGraphicsImage) GetMulti(keys []KittyGraphicsImageData, values []
 	if len(keys) == 0 {
 		return nil
 	}
-	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
-	cVals, cValsSize := cValuesArray(values)
-	defer Free(unsafe.Pointer(cVals), cValsSize)
+	// Copy the keys and output pointers into C memory. See get_multi.go.
+	var args getMultiArgs
+	cKeys, err := allocWithKeys[C.GhosttyKittyGraphicsImageData](&args, keys, values)
+	if err != nil {
+		return err
+	}
+	defer args.free()
 	return resultError(C.ghostty_kitty_graphics_image_get_multi(
 		img.ptr,
 		C.size_t(len(keys)),
-		(*C.GhosttyKittyGraphicsImageData)(unsafe.Pointer(&keys[0])),
-		cVals,
+		cKeys,
+		args.values,
 		nil,
 	))
 }
@@ -588,9 +598,6 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 	}
 
 	// Each value pointer receives the corresponding field from C.
-	// We must allocate the void** array in C memory to satisfy cgo
-	// pointer-passing rules (Go cannot pass a Go pointer containing
-	// other Go pointers to C).
 	values := [...]unsafe.Pointer{
 		unsafe.Pointer(&id),
 		unsafe.Pointer(&number),
@@ -601,14 +608,19 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 		unsafe.Pointer(&generation),
 		unsafe.Pointer(&dataLen),
 	}
-	cVals, cValsSize := cValuesArray(values[:])
-	defer Free(unsafe.Pointer(cVals), cValsSize)
+
+	// Copy the output pointers into C memory. See get_multi.go.
+	var args getMultiArgs
+	if err := args.alloc(values[:]); err != nil {
+		return nil, err
+	}
+	defer args.free()
 
 	if err := resultError(C.ghostty_kitty_graphics_image_get_multi(
 		img.ptr,
 		C.size_t(len(keys)),
 		&keys[0],
-		cVals,
+		args.values,
 		nil,
 	)); err != nil {
 		return nil, err
@@ -742,7 +754,7 @@ func (it *KittyGraphicsPlacementIterator) Next() bool {
 }
 
 // GetMulti queries multiple placement data fields in a single cgo
-// call. This is a low-level function; prefer the typed getters
+// call. This is a low-level function. Prefer the typed getters
 // (ImageID, PlacementID, Z, etc.) or Info() for normal use. GetMulti
 // is useful when you need a custom subset of fields and want to avoid
 // per-field cgo overhead.
@@ -752,11 +764,17 @@ func (it *KittyGraphicsPlacementIterator) Next() bool {
 // matches the "Output type" documented for that key in the upstream C
 // header (ghostty/vt/kitty_graphics.h,
 // GhosttyKittyGraphicsPlacementData enum).
+// Use a Go type with the same size as the C type, such as uint32
+// for uint32_t, bool for bool, and int32 for an enum.
+//
+// GetMulti returns an error if keys and values have different lengths
+// or if a key cannot be read. In the second case, values for the keys
+// before it may already have been written.
 //
 // Example:
 //
-//	var imageID C.uint32_t
-//	var z C.int32_t
+//	var imageID uint32
+//	var z int32
 //	err := it.GetMulti(
 //		[]KittyGraphicsPlacementData{KittyGraphicsPlacementDataImageID, KittyGraphicsPlacementDataZ},
 //		[]unsafe.Pointer{unsafe.Pointer(&imageID), unsafe.Pointer(&z)},
@@ -770,14 +788,18 @@ func (it *KittyGraphicsPlacementIterator) GetMulti(keys []KittyGraphicsPlacement
 	if len(keys) == 0 {
 		return nil
 	}
-	// Allocate the void** array in C memory to satisfy cgo pointer-passing rules.
-	cVals, cValsSize := cValuesArray(values)
-	defer Free(unsafe.Pointer(cVals), cValsSize)
+	// Copy the keys and output pointers into C memory. See get_multi.go.
+	var args getMultiArgs
+	cKeys, err := allocWithKeys[C.GhosttyKittyGraphicsPlacementData](&args, keys, values)
+	if err != nil {
+		return err
+	}
+	defer args.free()
 	return resultError(C.ghostty_kitty_graphics_placement_get_multi(
 		it.ptr,
 		C.size_t(len(keys)),
-		(*C.GhosttyKittyGraphicsPlacementData)(unsafe.Pointer(&keys[0])),
-		cVals,
+		cKeys,
+		args.values,
 		nil,
 	))
 }
@@ -980,7 +1002,6 @@ func (it *KittyGraphicsPlacementIterator) Info() (*KittyGraphicsPlacementInfo, e
 	}
 
 	// Each value pointer receives the corresponding field from C.
-	// Allocated in C memory to satisfy cgo pointer-passing rules.
 	values := [...]unsafe.Pointer{
 		unsafe.Pointer(&imageID),
 		unsafe.Pointer(&placementID),
@@ -995,14 +1016,19 @@ func (it *KittyGraphicsPlacementIterator) Info() (*KittyGraphicsPlacementInfo, e
 		unsafe.Pointer(&rows),
 		unsafe.Pointer(&z),
 	}
-	cVals, cValsSize := cValuesArray(values[:])
-	defer Free(unsafe.Pointer(cVals), cValsSize)
+
+	// Copy the output pointers into C memory. See get_multi.go.
+	var args getMultiArgs
+	if err := args.alloc(values[:]); err != nil {
+		return nil, err
+	}
+	defer args.free()
 
 	if err := resultError(C.ghostty_kitty_graphics_placement_get_multi(
 		it.ptr,
 		C.size_t(len(keys)),
 		&keys[0],
-		cVals,
+		args.values,
 		nil,
 	)); err != nil {
 		return nil, err
