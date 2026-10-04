@@ -16,7 +16,9 @@ import "unsafe"
 func cValuesArray(values []unsafe.Pointer) (*unsafe.Pointer, uintptr) {
 	n := len(values)
 	size := uintptr(n) * unsafe.Sizeof(unsafe.Pointer(nil))
-	cArr := (*unsafe.Pointer)(Alloc(size))
+	// The array holds pointers, so it must start out zeroed. See
+	// allocZeroed.
+	cArr := (*unsafe.Pointer)(allocZeroed(size))
 	dst := unsafe.Slice(cArr, n)
 	copy(dst, values)
 	return cArr, size

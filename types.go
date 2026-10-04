@@ -87,7 +87,9 @@ func newCGhosttyStringArray(values [][]byte) (*cGhosttyStringArray, error) {
 		return nil, &Error{Result: ResultLimitExceeded}
 	}
 	a.descriptorSize = uintptr(len(values)) * elementSize
-	a.descriptorPtr = Alloc(a.descriptorSize)
+	// Each GhosttyString in the array contains a pointer, so the array
+	// must start out zeroed. See allocZeroed.
+	a.descriptorPtr = allocZeroed(a.descriptorSize)
 	if a.descriptorPtr == nil {
 		return nil, &Error{Result: ResultOutOfMemory}
 	}

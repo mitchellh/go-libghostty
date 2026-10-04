@@ -786,8 +786,10 @@ func (o *selectionFormatOpts) prepare() (func(), error) {
 		return func() {}, nil
 	}
 
+	// GhosttySelection contains pointers through its grid references, so
+	// the memory must start out zeroed. See allocZeroed.
 	size := uintptr(C.sizeof_GhosttySelection)
-	ptr := Alloc(size)
+	ptr := allocZeroed(size)
 	if ptr == nil {
 		return nil, &Error{Result: ResultOutOfMemory}
 	}

@@ -275,6 +275,11 @@ func goSysDecodePngTrampoline(
 	// Copy decoded pixels into the library-owned buffer.
 	copy(unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(pixelLen)), img.Data)
 
+	// libghostty does not initialize out before calling us, and out.data
+	// is a pointer. Zero the struct as bytes before filling it in. See
+	// allocZeroed.
+	clear(unsafe.Slice((*byte)(unsafe.Pointer(out)), C.sizeof_GhosttySysImage))
+
 	out.width = C.uint32_t(img.Width)
 	out.height = C.uint32_t(img.Height)
 	out.data = buf

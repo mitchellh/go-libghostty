@@ -468,7 +468,9 @@ func newCGhosttyClipboardContents(values []ClipboardContent) (*cGhosttyClipboard
 		return nil, &Error{Result: ResultLimitExceeded}
 	}
 	owner.descriptorSize = uintptr(len(values)) * elementSize
-	owner.descriptorPtr = Alloc(owner.descriptorSize)
+	// Each GhosttyClipboardContent in the array contains pointers, so the
+	// array must start out zeroed. See allocZeroed.
+	owner.descriptorPtr = allocZeroed(owner.descriptorSize)
 	if owner.descriptorPtr == nil {
 		owner.close()
 		return nil, &Error{Result: ResultOutOfMemory}
