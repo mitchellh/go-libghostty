@@ -503,6 +503,52 @@ func (t *Terminal) SetUnknownMaxBytes(limit uint) error {
 	))
 }
 
+// SetChecksumReport enables or disables replies to screen checksum requests.
+//
+// A program requests a checksum of part of the screen with the DECRQCRA
+// sequence (CSI Pi ; Pg ; Pt ; Pl ; Pb ; Pr * y). Test suites such as
+// vttest and esctest use these replies to check what a terminal displays.
+//
+// Replies are disabled by default because they leak screen contents. A
+// program can request the checksum of one cell at a time and work out
+// every character on the screen, including output from other programs.
+// Enable replies only when every program that can write to the terminal
+// is trusted.
+//
+// While replies are disabled, programs also cannot change how checksums
+// are calculated. See [Terminal.SetChecksumFlags].
+//
+// C: GHOSTTY_TERMINAL_OPT_XT_CHECKSUM_REPORT
+func (t *Terminal) SetChecksumReport(enabled bool) error {
+	v := C.bool(enabled)
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_XT_CHECKSUM_REPORT,
+		unsafe.Pointer(&v),
+	))
+}
+
+// SetChecksumFlags sets how screen checksums are calculated. It changes the
+// current calculation and the one the terminal returns to after a full reset.
+// Zero, the default, calculates checksums the way a real DEC terminal does.
+//
+// Running programs can change the calculation themselves with the
+// XTCHECKSUM sequence (CSI Ps # y). Their change lasts until the next full
+// reset, which restores flags.
+//
+// SetChecksumFlags returns an error matching [ErrInvalidValue] if flags
+// contains bits other than the defined [ChecksumFlags] constants.
+//
+// C: GHOSTTY_TERMINAL_OPT_XT_CHECKSUM_EXTENSION
+func (t *Terminal) SetChecksumFlags(flags ChecksumFlags) error {
+	v := C.uint8_t(flags)
+	return resultError(C.ghostty_terminal_set(
+		t.ptr,
+		C.GHOSTTY_TERMINAL_OPT_XT_CHECKSUM_EXTENSION,
+		unsafe.Pointer(&v),
+	))
+}
+
 // setStringOption stages a Go string through C-owned memory before passing a
 // GhosttyString descriptor to cgo. ghostty_terminal_set copies string options
 // synchronously, so the temporary allocation can be released on return.

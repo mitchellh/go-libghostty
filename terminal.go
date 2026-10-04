@@ -90,6 +90,15 @@ type TerminalConfig struct {
 	// retains the secure disabled default.
 	TitleReport *bool
 
+	// ChecksumReport optionally enables replies to screen checksum
+	// requests. Nil leaves them disabled, which is the default. See
+	// [Terminal.SetChecksumReport].
+	ChecksumReport *bool
+
+	// ChecksumFlags optionally sets how screen checksums are calculated.
+	// Nil leaves the default of zero. See [Terminal.SetChecksumFlags].
+	ChecksumFlags *ChecksumFlags
+
 	// ResizePullScrollback optionally controls whether a resize may pull
 	// rows out of scrollback back into the active area. Nil retains the
 	// default of true.
@@ -126,6 +135,42 @@ type TerminalConfig struct {
 	onSemanticPrompt      SemanticPromptFunc
 	onReset               ResetFunc
 }
+
+// ChecksumFlags controls how the terminal calculates screen checksums. Flags
+// can be combined with bitwise OR. The zero value calculates checksums the
+// way a real DEC terminal does, which is what most programs expect.
+//
+// The bits match the parameter of the XTCHECKSUM sequence (CSI Ps # y) and
+// xterm's checksumExtension resource. The C API has no named constants for
+// them, so the values are defined here.
+//
+// See [Terminal.SetChecksumReport] and [Terminal.SetChecksumFlags].
+//
+// C: uint8_t (GHOSTTY_TERMINAL_OPT_XT_CHECKSUM_EXTENSION)
+type ChecksumFlags uint8
+
+const (
+	// ChecksumNoNegate reports the sum as is. By default the reported
+	// value is the negated sum.
+	ChecksumNoNegate ChecksumFlags = 1 << iota
+
+	// ChecksumNoAttributes leaves out text attributes such as bold and
+	// underline. By default each cell adds a value for its attributes.
+	ChecksumNoAttributes
+
+	// ChecksumKeepSpaces counts every space. By default a plain space is
+	// only counted when it is the first cell of the area.
+	ChecksumKeepSpaces
+
+	// ChecksumUnwrittenAsSpace counts cells that were never written to as
+	// spaces. By default those cells are skipped.
+	ChecksumUnwrittenAsSpace
+
+	// ChecksumFullCodepoint sums the full Unicode code point of each
+	// character. By default characters are reduced to the 8-bit values a
+	// DEC terminal uses.
+	ChecksumFullCodepoint
+)
 
 // WritePtyFn is called when the terminal writes data back to the pty, such as
 // query and mode reports, clipboard replies, and terminal paste output. The
@@ -736,6 +781,23 @@ func WithTitleReport(enabled bool) TerminalOption {
 	}
 }
 
+// WithChecksumReport enables or disables replies to screen checksum
+// requests. Replies are disabled by default. See [Terminal.SetChecksumReport]
+// for why.
+func WithChecksumReport(enabled bool) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.ChecksumReport = &enabled
+	}
+}
+
+// WithChecksumFlags sets how screen checksums are calculated. See
+// [Terminal.SetChecksumFlags] for details.
+func WithChecksumFlags(flags ChecksumFlags) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.ChecksumFlags = &flags
+	}
+}
+
 // WithResizePullScrollback controls whether a resize may pull rows out of
 // scrollback back into the active area. See Terminal.SetResizePullScrollback
 // for details. The default is true.
@@ -992,6 +1054,18 @@ func NewTerminal(opts ...TerminalOption) (*Terminal, error) {
 	}
 	if cfg.TitleReport != nil {
 		if err := t.SetTitleReport(*cfg.TitleReport); err != nil {
+			t.Close()
+			return nil, err
+		}
+	}
+	if cfg.ChecksumReport != nil {
+		if err := t.SetChecksumReport(*cfg.ChecksumReport); err != nil {
+			t.Close()
+			return nil, err
+		}
+	}
+	if cfg.ChecksumFlags != nil {
+		if err := t.SetChecksumFlags(*cfg.ChecksumFlags); err != nil {
 			t.Close()
 			return nil, err
 		}

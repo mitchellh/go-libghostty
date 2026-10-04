@@ -2,6 +2,7 @@ package libghostty
 
 import (
 	"bytes"
+	"errors"
 	"slices"
 	"testing"
 )
@@ -909,6 +910,62 @@ func TestTerminalTitleReport(t *testing.T) {
 	term.VTWrite([]byte("\x1b[21t"))
 	if received != nil {
 		t.Fatalf("expected disabled title report to be ignored, got %q", received)
+	}
+}
+
+func TestTerminalChecksumReport(t *testing.T) {
+	var received []byte
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithChecksumReport(true),
+		WithChecksumFlags(ChecksumNoNegate|ChecksumFullCodepoint),
+		WithWritePty(func(_ *Terminal, data []byte) {
+			received = append(received, data...)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// DECRQCRA replies with DCS Pi ! ~ <4 hex digits> ST.
+	const query = "\x1b[7;1;1;1;24;80*y"
+	term.VTWrite([]byte("hello"))
+	term.VTWrite([]byte(query))
+	if !bytes.HasPrefix(received, []byte("\x1bP7!~")) ||
+		!bytes.HasSuffix(received, []byte("\x1b\\")) ||
+		len(received) != len("\x1bP7!~0000\x1b\\") {
+		t.Fatalf("unexpected checksum report %q", received)
+	}
+
+	received = nil
+	if err := term.SetChecksumReport(false); err != nil {
+		t.Fatal(err)
+	}
+	term.VTWrite([]byte(query))
+	if received != nil {
+		t.Fatalf("expected disabled checksum report to be ignored, got %q", received)
+	}
+}
+
+func TestTerminalChecksumFlags(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// Every defined flag at once is accepted.
+	all := ChecksumNoNegate | ChecksumNoAttributes | ChecksumKeepSpaces |
+		ChecksumUnwrittenAsSpace | ChecksumFullCodepoint
+	if err := term.SetChecksumFlags(all); err != nil {
+		t.Fatal(err)
+	}
+
+	// The next bit up is not defined and is rejected.
+	undefined := ChecksumFullCodepoint << 1
+	if err := term.SetChecksumFlags(undefined); !errors.Is(err, ErrInvalidValue) {
+		t.Fatalf("expected ErrInvalidValue for undefined flag, got %v", err)
 	}
 }
 

@@ -75,26 +75,30 @@ import "C"
 
 import "unsafe"
 
-// SysImage holds the result of decoding an image (e.g. PNG) into raw
-// RGBA pixel data. Returned by the user-supplied decode callback.
+// SysImage is a decoded image, returned by a [SysDecodePngFn].
+//
 // C: GhosttySysImage
 type SysImage struct {
-	// Width of the decoded image in pixels.
+	// Width is the image width in pixels.
 	Width uint32
 
-	// Height of the decoded image in pixels.
+	// Height is the image height in pixels.
 	Height uint32
 
-	// Data is the decoded RGBA pixel data (4 bytes per pixel).
+	// Data holds the pixels as 8-bit RGBA, four bytes per pixel. Rows
+	// are stored in order starting from the top-left corner, with no
+	// padding between them, so a complete image is Width*Height*4 bytes.
 	Data []byte
 }
 
-// SysDecodePngFn is the Go callback type for PNG decoding. It receives
-// raw PNG data and must return a decoded SysImage. The returned pixel
-// data will be copied into library-managed memory; the caller does not
-// need to keep the slice alive after returning.
+// SysDecodePngFn decodes the PNG image in data and returns its pixels.
+// Return a non-nil error if the image cannot be decoded. The image is then
+// rejected.
 //
-// Return a non-nil error to indicate decode failure.
+// data is only valid until the function returns, so copy it if you need
+// it later. The pixels in the returned [SysImage] are copied into memory
+// owned by libghostty, so the function does not need to keep them alive.
+//
 // C: GhosttySysDecodePngFn
 type SysDecodePngFn func(data []byte) (*SysImage, error)
 
@@ -275,11 +279,9 @@ func goSysDecodePngTrampoline(
 	// Copy decoded pixels into the library-owned buffer.
 	copy(unsafe.Slice((*byte)(unsafe.Pointer(buf)), int(pixelLen)), img.Data)
 
-	// libghostty does not initialize out before calling us, and out.data
-	// is a pointer. Zero the struct as bytes before filling it in. See
-	// allocZeroed.
-	clear(unsafe.Slice((*byte)(unsafe.Pointer(out)), C.sizeof_GhosttySysImage))
-
+	// out.data is a pointer, and Go may only store a pointer into C
+	// memory that is already zeroed (see allocZeroed). libghostty zeroes
+	// out before calling us, so the fields can be set directly.
 	out.width = C.uint32_t(img.Width)
 	out.height = C.uint32_t(img.Height)
 	out.data = buf
