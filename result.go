@@ -79,12 +79,13 @@ var (
 	ErrRejected error = &Error{Result: ResultRejected}
 )
 
-// Is reports whether target is an [*Error] with the same Result. This
-// lets [errors.Is] match the Err* sentinels even though every failure
-// returns a freshly allocated Error.
+// Is reports whether target is a non-nil [*Error] with the same Result.
+// This lets [errors.Is] match the Err* sentinels even though every
+// failure returns a freshly allocated Error. A typed-nil *Error target
+// never matches.
 func (e *Error) Is(target error) bool {
 	t, ok := target.(*Error)
-	return ok && t.Result == e.Result
+	return ok && t != nil && t.Result == e.Result
 }
 
 func (e *Error) Error() string {

@@ -118,3 +118,13 @@ func TestResultErrorSentinel(t *testing.T) {
 		t.Fatalf("expected ErrInvalidValue, got %v", err)
 	}
 }
+
+func TestErrorIsTypedNilTarget(t *testing.T) {
+	// A typed-nil *Error is a valid errors.Is target. It must not match,
+	// and must not panic by dereferencing the nil target.
+	var err error = &Error{Result: ResultNoValue}
+	var target *Error
+	if errors.Is(err, target) {
+		t.Fatal("errors.Is(Error, (*Error)(nil)) = true, want false")
+	}
+}
