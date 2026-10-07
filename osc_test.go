@@ -132,3 +132,23 @@ func TestOSCParserUnknown(t *testing.T) {
 		t.Fatalf("disabled again: %v", got)
 	}
 }
+
+func TestOSCParserProgramStatus(t *testing.T) {
+	parser, err := NewOSCParser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parser.Close()
+
+	// The parser only identifies OSC 7501. Report contents are delivered
+	// through a terminal's ProgramStatusFunc instead.
+	for _, body := range []string{"7501;state=working", "7501;?"} {
+		parser.Reset()
+		for _, b := range []byte(body) {
+			parser.Next(b)
+		}
+		if got := parser.End('\a').Type(); got != OSCCommandProgramStatus {
+			t.Fatalf("%q: expected program status command, got %d", body, got)
+		}
+	}
+}

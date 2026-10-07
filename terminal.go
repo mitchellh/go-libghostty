@@ -37,6 +37,7 @@ type Terminal struct {
 	onTitleChanged        TitleChangedFn
 	onPwdChanged          PwdChangedFn
 	onProgressReport      ProgressReportFn
+	onProgramStatus       ProgramStatusFunc
 	onEnquiry             EnquiryFn
 	onXtversion           XtversionFn
 	onSize                SizeFn
@@ -125,6 +126,7 @@ type TerminalConfig struct {
 	onTitleChanged        TitleChangedFn
 	onPwdChanged          PwdChangedFn
 	onProgressReport      ProgressReportFn
+	onProgramStatus       ProgramStatusFunc
 	onEnquiry             EnquiryFn
 	onXtversion           XtversionFn
 	onSize                SizeFn
@@ -432,6 +434,183 @@ type TerminalProgressReport struct {
 // C: GhosttyTerminalProgressReportFn
 type ProgressReportFn func(t *Terminal, report TerminalProgressReport)
 
+// ProgramStatusState describes what a program is doing, as reported in a
+// [ProgramStatus].
+//
+// Later versions of libghostty may add new states, so a [ProgramStatusFunc]
+// should ignore states it does not recognize.
+//
+// C: GhosttyProgramStatusState
+type ProgramStatusState int
+
+const (
+	// ProgramStatusStateIdle means the program is waiting for the user to
+	// tell it what to do next, such as an interactive tool sitting at its
+	// own prompt.
+	ProgramStatusStateIdle ProgramStatusState = C.GHOSTTY_PROGRAM_STATUS_STATE_IDLE
+
+	// ProgramStatusStateWorking means the program is busy and doesn't need
+	// the user. The report may include a progress percentage.
+	ProgramStatusStateWorking ProgramStatusState = C.GHOSTTY_PROGRAM_STATUS_STATE_WORKING
+
+	// ProgramStatusStateDone means the program finished its work and the
+	// result is ready for the user to look at.
+	ProgramStatusStateDone ProgramStatusState = C.GHOSTTY_PROGRAM_STATUS_STATE_DONE
+
+	// ProgramStatusStateBlocked means the program can't continue until the
+	// user does something. The report's Kind says what the program needs and
+	// its Message says why. The report may include a progress percentage.
+	ProgramStatusStateBlocked ProgramStatusState = C.GHOSTTY_PROGRAM_STATUS_STATE_BLOCKED
+
+	// ProgramStatusStateError means the program failed and stopped.
+	ProgramStatusStateError ProgramStatusState = C.GHOSTTY_PROGRAM_STATUS_STATE_ERROR
+
+	// ProgramStatusStateClear doesn't describe the program. Instead, it asks
+	// the application to remove the record with the report's ID along with
+	// every record beneath it. If the ID is empty, remove every record.
+	ProgramStatusStateClear ProgramStatusState = C.GHOSTTY_PROGRAM_STATUS_STATE_CLEAR
+)
+
+// ProgramStatusKind describes what a blocked program needs from the user,
+// as reported in a [ProgramStatus].
+//
+// Later versions of libghostty may add new kinds, so a [ProgramStatusFunc]
+// should treat kinds it does not recognize like [ProgramStatusKindNone].
+//
+// C: GhosttyProgramStatusKind
+type ProgramStatusKind int
+
+const (
+	// ProgramStatusKindNone means the program didn't say what it needs, or
+	// the program isn't blocked.
+	ProgramStatusKindNone ProgramStatusKind = C.GHOSTTY_PROGRAM_STATUS_KIND_NONE
+
+	// ProgramStatusKindPermission means the program is asking the user to
+	// approve something, such as "Apply these changes?".
+	ProgramStatusKindPermission ProgramStatusKind = C.GHOSTTY_PROGRAM_STATUS_KIND_PERMISSION
+
+	// ProgramStatusKindQuestion means the program is waiting for the user to
+	// type an answer.
+	ProgramStatusKindQuestion ProgramStatusKind = C.GHOSTTY_PROGRAM_STATUS_KIND_QUESTION
+
+	// ProgramStatusKindAuth means the program needs a login, password, token,
+	// or other credential.
+	ProgramStatusKindAuth ProgramStatusKind = C.GHOSTTY_PROGRAM_STATUS_KIND_AUTH
+)
+
+// ProgramStatus is a report from a program about what it is doing.
+//
+// Programs send these reports with the OSC 7501 escape sequence, known as
+// the program status protocol. The protocol is meant for long-running work
+// such as builds, deploys, and coding agents. The user is often looking at
+// something else while that work runs, and the reports let an application
+// tell them when it finishes or needs their attention. The protocol only
+// describes what the program is doing. Whether and how to show it is up to
+// the application. The full specification is at
+// https://www.superlogical.com/rex/docs/build/program-status.
+//
+// For example, a program waiting for the user to approve a change might
+// send the following, where ST ends the sequence:
+//
+//	ESC ] 7501 ; state=blocked:kind=permission:app=terraform:msg=QXBwbHk/ ST
+//
+// That produces this report. Progress is -1 because the program didn't
+// send one, and Message is decoded from the base64 text in msg:
+//
+//	ProgramStatus{
+//		State:    ProgramStatusStateBlocked,
+//		Kind:     ProgramStatusKindPermission,
+//		Progress: -1,
+//		App:      "terraform",
+//		Message:  "Apply?",
+//	}
+//
+// Fields the program didn't send are left empty. A ProgramStatus is an
+// ordinary Go value that may be kept after the callback that received it
+// returns.
+//
+// C: GhosttyTerminalProgramStatus
+type ProgramStatus struct {
+	// State is what the program is doing.
+	State ProgramStatusState
+
+	// Kind is what the program needs from the user. It is only set when
+	// State is [ProgramStatusStateBlocked]. Otherwise, it is
+	// [ProgramStatusKindNone].
+	Kind ProgramStatusKind
+
+	// Progress is how much of the work is done, as a percentage from 0
+	// through 100. It is only set when State is [ProgramStatusStateWorking]
+	// or [ProgramStatusStateBlocked]. It is -1 when the program didn't
+	// report progress.
+	Progress int8
+
+	// ID names the record this report is about. Most programs only report
+	// on themselves and leave ID empty, which refers to the program's own
+	// record.
+	//
+	// A program doing several things at once gives each one its own ID,
+	// such as "us-east" and "eu-west" for a deploy to two regions. A slash
+	// nests one record under another, so "build/test" belongs to "build".
+	// The parent record doesn't have to exist.
+	ID string
+
+	// App is a short, stable name for the program, such as "cargo" or
+	// "terraform". It is meant for matching in code rather than for display.
+	App string
+
+	// Title is a short label for the record, meant for display. Programs
+	// that report several records use it to tell them apart.
+	Title string
+
+	// Message is one line of text for the user saying what the record is
+	// doing, waiting for, or has finished. Display it as-is, shortened if
+	// needed, but don't try to parse meaning from it.
+	Message string
+}
+
+// ProgramStatusFunc is called each time the running program sends a valid
+// program status report. See [ProgramStatus] for what a report contains.
+//
+// The terminal doesn't remember reports, so the application must keep
+// track of them. Keep one record for each ID, and update the records using
+// these rules from the specification:
+//
+//   - A new report replaces the record with the same ID entirely. Fields
+//     the new report leaves empty are cleared, not carried over.
+//   - A [ProgramStatusStateClear] report removes the record with its ID and
+//     every record nested under it. Clearing "build" also removes
+//     "build/test". A clear report with an empty ID removes every record.
+//   - When a new shell prompt appears or the program exits, remove working
+//     and blocked records. Idle records may be removed too. Keep done and
+//     error records until the user has seen them, such as the next time
+//     they focus the terminal. Use [WithSemanticPrompt] to learn when a new
+//     prompt appears.
+//   - Keep at most 256 records, and allow at least 64. When a new record
+//     would go over the limit, remove the one that changed least recently.
+//
+// When the program performs a full terminal reset (ESC c), the terminal
+// calls this function with a clear report and an empty ID before calling
+// the [ResetFunc].
+//
+// Programs check whether the terminal supports the protocol before sending
+// reports. The terminal answers that check only while a ProgramStatusFunc is
+// set, and it sends the answer through the [WritePtyFn]. Set both, or
+// programs will assume the protocol isn't supported.
+//
+// Title and Message never contain control characters, but they come from
+// the program and should not be trusted. Don't interpret them as markup. If
+// the application shows them outside the terminal, such as in a tab title
+// or a notification, strip invisible formatting characters such as text
+// direction overrides. Also make clear which terminal the text came from,
+// so a program can't pretend to be running somewhere else.
+//
+// The function runs synchronously while the terminal processes output, so
+// it should return quickly.
+//
+// C: GhosttyTerminalProgramStatusFn
+type ProgramStatusFunc func(t *Terminal, status ProgramStatus)
+
 // SemanticPromptKind identifies the step of a shell command that a
 // [TerminalSemanticPrompt] event reports.
 //
@@ -558,8 +737,9 @@ type SemanticPromptFunc func(t *Terminal, event TerminalSemanticPrompt)
 // The function is called after the terminal has reset itself. The title and
 // working directory callbacks, [TitleChangedFn] and [PwdChangedFn], are not
 // called when a reset clears those values, so update anything that displays
-// them here. A full reset also removes any progress report. If a
-// [ProgressReportFn] is set, it is called before this function.
+// them here. A full reset also removes any progress report and every program
+// status record. If a [ProgressReportFn] or [ProgramStatusFunc] is set, the
+// terminal calls it to report the removal before calling this function.
 //
 // This function is not called for a soft reset (CSI ! p), which only
 // restores a few modes. It is also not called for [Terminal.Reset], because
@@ -904,6 +1084,16 @@ func WithProgressReport(fn ProgressReportFn) TerminalOption {
 	}
 }
 
+// WithProgramStatus sets fn as the function called when the running program
+// reports what it is doing. If fn is nil, these reports are ignored and the
+// terminal tells programs it doesn't support them. See [ProgramStatusFunc]
+// for details.
+func WithProgramStatus(fn ProgramStatusFunc) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.onProgramStatus = fn
+	}
+}
+
 // WithUnknownSequence registers a handler for unsupported terminal sequence
 // identifiers. Capture must also be enabled with [WithUnknownMaxBytes].
 func WithUnknownSequence(fn UnknownSequenceFn) TerminalOption {
@@ -1115,6 +1305,7 @@ func terminalFromC(cterm C.GhosttyTerminal, cfg TerminalConfig) *Terminal {
 		onTitleChanged:        cfg.onTitleChanged,
 		onPwdChanged:          cfg.onPwdChanged,
 		onProgressReport:      cfg.onProgressReport,
+		onProgramStatus:       cfg.onProgramStatus,
 		onEnquiry:             cfg.onEnquiry,
 		onXtversion:           cfg.onXtversion,
 		onSize:                cfg.onSize,

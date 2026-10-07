@@ -67,6 +67,15 @@ func (t *Terminal) SetEffectProgressReport(fn ProgressReportFn) {
 	t.syncEffects()
 }
 
+// SetEffectProgramStatus sets fn as the function called when the running
+// program reports what it is doing. Passing nil removes the current function,
+// and the terminal then tells programs it doesn't support these reports. See
+// [ProgramStatusFunc] for details.
+func (t *Terminal) SetEffectProgramStatus(fn ProgramStatusFunc) {
+	t.onProgramStatus = fn
+	t.syncEffects()
+}
+
 // SetEffectEnquiry registers (or clears) the enquiry effect on a live
 // terminal. Pass nil to clear.
 func (t *Terminal) SetEffectEnquiry(fn EnquiryFn) {

@@ -11,7 +11,7 @@ set(GHOSTTY_ZIG_BUILD_FLAGS "-Demit-xcframework=false" CACHE STRING
 
 FetchContent_Declare(ghostty
     GIT_REPOSITORY https://github.com/ghostty-org/ghostty.git
-    GIT_TAG 0e0ff282f72c92d930d41f4703547d3bc9618ba2
+    GIT_TAG 34f39002c6e3974b54e6a6d400bd83777c5ea558
 )
 FetchContent_MakeAvailable(ghostty)
 

@@ -99,6 +99,12 @@ const (
 	// OSCCommandUnknown identifies an OSC command whose number the parser
 	// does not recognize. Enable capture with [OSCParser.SetUnknownMaxBytes].
 	OSCCommandUnknown OSCCommandType = C.GHOSTTY_OSC_COMMAND_UNKNOWN
+
+	// OSCCommandProgramStatus identifies an OSC 7501 program status report,
+	// or a program asking whether the terminal supports those reports. The
+	// parser doesn't decode the report itself. To read reports, create a
+	// [Terminal] with [WithProgramStatus].
+	OSCCommandProgramStatus OSCCommandType = C.GHOSTTY_OSC_COMMAND_PROGRAM_STATUS
 )
 
 // OSCCommandData identifies typed data extractable from an OSC command.

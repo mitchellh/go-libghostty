@@ -21,6 +21,7 @@ extern void goDesktopNotificationTrampoline(GhosttyTerminal, void*, GhosttyTermi
 extern void goTitleChangedTrampoline(GhosttyTerminal, void*);
 extern void goPwdChangedTrampoline(GhosttyTerminal, void*);
 extern void goProgressReportTrampoline(GhosttyTerminal, void*, GhosttyTerminalProgressReport*);
+extern void goProgramStatusTrampoline(GhosttyTerminal, void*, GhosttyTerminalProgramStatus*);
 extern GhosttyString goEnquiryTrampoline(GhosttyTerminal, void*);
 extern GhosttyString goXtversionTrampoline(GhosttyTerminal, void*);
 extern bool goSizeTrampoline(GhosttyTerminal, void*, GhosttySizeReportSize*);
@@ -57,6 +58,9 @@ static inline GhosttyResult set_pwd_changed(GhosttyTerminal t) {
 }
 static inline GhosttyResult set_progress_report(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT, (const void*)goProgressReportTrampoline);
+}
+static inline GhosttyResult set_program_status(GhosttyTerminal t) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS, (const void*)goProgramStatusTrampoline);
 }
 static inline GhosttyResult set_enquiry(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_ENQUIRY, (const void*)goEnquiryTrampoline);
@@ -184,6 +188,11 @@ func (t *Terminal) syncEffects() {
 	} else {
 		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT)
 	}
+	if t.onProgramStatus != nil {
+		C.set_program_status(t.ptr)
+	} else {
+		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS)
+	}
 	if t.onEnquiry != nil {
 		C.set_enquiry(t.ptr)
 	} else {
@@ -242,6 +251,7 @@ func (t *Terminal) hasEffects() bool {
 		t.onTitleChanged != nil ||
 		t.onPwdChanged != nil ||
 		t.onProgressReport != nil ||
+		t.onProgramStatus != nil ||
 		t.onEnquiry != nil ||
 		t.onXtversion != nil ||
 		t.onSize != nil ||
@@ -575,6 +585,55 @@ func goProgressReportTrampoline(
 	t.onProgressReport(t, TerminalProgressReport{
 		State:    TerminalProgressState(report.state),
 		Progress: int8(report.progress),
+	})
+}
+
+//export goProgramStatusTrampoline
+func goProgramStatusTrampoline(
+	_ C.GhosttyTerminal,
+	userdata unsafe.Pointer,
+	report *C.GhosttyTerminalProgramStatus,
+) {
+	t := terminalFromUserdata(userdata)
+	if t.onProgramStatus == nil {
+		return
+	}
+
+	// GhosttyTerminalProgramStatus is a sized struct. Only read the fields
+	// when the caller supplied the complete layout known here.
+	if report == nil ||
+		report.size < C.size_t(C.sizeof_GhosttyTerminalProgramStatus) {
+		return
+	}
+
+	// The strings are only valid during the callback, so copy them all into
+	// Go memory. A malformed string drops the whole report rather than
+	// delivering a partial record, since reports replace records entirely.
+	id, ok := copyGhosttyString(report.id)
+	if !ok {
+		return
+	}
+	app, ok := copyGhosttyString(report.app)
+	if !ok {
+		return
+	}
+	title, ok := copyGhosttyString(report.title)
+	if !ok {
+		return
+	}
+	message, ok := copyGhosttyString(report.message)
+	if !ok {
+		return
+	}
+
+	t.onProgramStatus(t, ProgramStatus{
+		State:    ProgramStatusState(report.state),
+		Kind:     ProgramStatusKind(report.kind),
+		Progress: int8(report.progress),
+		ID:       string(id),
+		App:      string(app),
+		Title:    string(title),
+		Message:  string(message),
 	})
 }
 

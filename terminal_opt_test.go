@@ -572,6 +572,97 @@ func TestTerminalProgressReportEffect(t *testing.T) {
 	}
 }
 
+func TestTerminalProgramStatusEffect(t *testing.T) {
+	var reports []ProgramStatus
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithProgramStatus(func(_ *Terminal, report ProgramStatus) {
+			reports = append(reports, report)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	tests := []struct {
+		sequence string
+		want     ProgramStatus
+	}{
+		{
+			// The example from the header: msg is base64 for "Apply?".
+			"\x1b]7501;state=blocked:kind=permission:app=terraform:msg=QXBwbHk/\x1b\\",
+			ProgramStatus{
+				State:    ProgramStatusStateBlocked,
+				Kind:     ProgramStatusKindPermission,
+				Progress: -1,
+				App:      "terraform",
+				Message:  "Apply?",
+			},
+		},
+		{
+			"\x1b]7501;state=working:id=build/test:progress=42\x07",
+			ProgramStatus{
+				State:    ProgramStatusStateWorking,
+				Kind:     ProgramStatusKindNone,
+				Progress: 42,
+				ID:       "build/test",
+			},
+		},
+		{
+			"\x1b]7501;state=clear:id=build\x1b\\",
+			ProgramStatus{
+				State:    ProgramStatusStateClear,
+				Kind:     ProgramStatusKindNone,
+				Progress: -1,
+				ID:       "build",
+			},
+		},
+	}
+	for i, test := range tests {
+		term.VTWrite([]byte(test.sequence))
+		if len(reports) != i+1 {
+			t.Fatalf("expected report %d, got %d reports", i, len(reports))
+		}
+		if got := reports[i]; got != test.want {
+			t.Fatalf("unexpected program status %d:\n got: %+v\nwant: %+v", i, got, test.want)
+		}
+	}
+
+	term.SetEffectProgramStatus(nil)
+	term.VTWrite([]byte("\x1b]7501;state=idle\x1b\\"))
+	if len(reports) != len(tests) {
+		t.Fatalf("expected callback to remain cleared, got %d reports", len(reports))
+	}
+}
+
+func TestTerminalProgramStatusQuery(t *testing.T) {
+	var written []byte
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithWritePty(func(_ *Terminal, data []byte) {
+			written = append(written, data...)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// Without a program status callback the support query is unanswered.
+	term.VTWrite([]byte("\x1b]7501;?\x1b\\"))
+	if len(written) != 0 {
+		t.Fatalf("expected no reply without callback, got %q", written)
+	}
+
+	// With a callback set, the terminal answers the query.
+	term.SetEffectProgramStatus(func(_ *Terminal, _ ProgramStatus) {})
+	term.VTWrite([]byte("\x1b]7501;?\x1b\\"))
+	if !bytes.HasPrefix(written, []byte("\x1b]7501;")) {
+		t.Fatalf("expected OSC 7501 reply, got %q", written)
+	}
+}
+
 func TestTerminalWithWritePty(t *testing.T) {
 	var received []byte
 	term, err := NewTerminal(WithSize(80, 24), WithWritePty(func(_ *Terminal, data []byte) {
@@ -1221,6 +1312,12 @@ func TestTerminalWithReset(t *testing.T) {
 		WithProgressReport(func(_ *Terminal, _ TerminalProgressReport) {
 			order = append(order, "progress")
 		}),
+		WithProgramStatus(func(_ *Terminal, report ProgramStatus) {
+			if report.State != ProgramStatusStateClear || report.ID != "" {
+				t.Errorf("unexpected program status on reset: %+v", report)
+			}
+			order = append(order, "status")
+		}),
 		WithReset(func(_ *Terminal) {
 			order = append(order, "reset")
 		}),
@@ -1236,9 +1333,10 @@ func TestTerminalWithReset(t *testing.T) {
 		t.Fatalf("soft reset reported events %v", order)
 	}
 
-	// RIS reports the progress removal before the reset itself.
+	// RIS reports the progress removal and program status clear before the
+	// reset itself.
 	term.VTWrite([]byte("\x1bc"))
-	if want := []string{"progress", "reset"}; !slices.Equal(order, want) {
+	if want := []string{"progress", "status", "reset"}; !slices.Equal(order, want) {
 		t.Fatalf("expected events %v, got %v", want, order)
 	}
 }
