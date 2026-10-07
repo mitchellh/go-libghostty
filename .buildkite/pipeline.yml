@@ -68,6 +68,7 @@ steps:
       - input
       - modes
       - render
+      - snapshot
 
   - label: ":zig: cross {{matrix}}"
     <<: *retry
