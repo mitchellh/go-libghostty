@@ -23,6 +23,11 @@ const (
 
 	// SizeReportCSI18T is the XTWINOPS text area size in characters.
 	SizeReportCSI18T SizeReportStyle = C.GHOSTTY_SIZE_REPORT_CSI_18_T
+
+	// SizeReportCSI19T is the XTWINOPS screen size in characters, sent as
+	// ESC [ 9 ; rows ; cols t. The terminal can't know the size of the
+	// physical screen, so it reports the same size as [SizeReportCSI18T].
+	SizeReportCSI19T SizeReportStyle = C.GHOSTTY_SIZE_REPORT_CSI_19_T
 )
 
 // SizeReportSize holds terminal geometry for XTWINOPS size queries.

@@ -95,6 +95,52 @@ func TestTerminalPasteRejectedAndRetry(t *testing.T) {
 	}
 }
 
+func TestTerminalPasteRejectsCarriageReturn(t *testing.T) {
+	// A carriage return is the Enter key on the input stream, so an
+	// unbracketed paste refuses it exactly like a newline.
+	var output bytes.Buffer
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithWritePty(func(_ *Terminal, data []byte) {
+			output.Write(data)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	paste := Paste{
+		Location: ClipboardLocationStandard,
+		Source:   PasteSourceClipboard,
+		MIMEs:    []string{"text/plain"},
+		Reader: func(_ string, writer io.Writer) error {
+			_, err := io.WriteString(writer, "rm -rf /\r")
+			return err
+		},
+	}
+	written, err := term.Paste(paste)
+	if written {
+		t.Fatal("expected rejected paste not to write")
+	}
+	assertResultError(t, err, ResultRejected)
+	if output.Len() != 0 {
+		t.Fatalf("expected rejected paste to write nothing, got %q", output.Bytes())
+	}
+
+	paste.AllowUnsafe = true
+	written, err = term.Paste(paste)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !written {
+		t.Fatal("expected confirmed paste to write")
+	}
+	if got := output.String(); got != "rm -rf /\r" {
+		t.Fatalf("expected confirmed paste output, got %q", got)
+	}
+}
+
 func TestTerminalPasteBracketed(t *testing.T) {
 	var output bytes.Buffer
 	term, err := NewTerminal(
@@ -246,6 +292,7 @@ func TestPasteIsSafe(t *testing.T) {
 		{name: "empty", data: "", want: true},
 		{name: "plain", data: "hello", want: true},
 		{name: "newline", data: "hello\nworld", want: false},
+		{name: "carriage return", data: "hello\rworld", want: false},
 		{name: "bracketed paste end", data: "hello\x1b[201~world", want: false},
 	}
 

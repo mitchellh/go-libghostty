@@ -76,10 +76,16 @@ type Paste struct {
 // text or a Kitty clipboard paste event through the terminal's write-pty
 // callback. The returned boolean reports whether anything was written.
 //
-// Text that could inject commands returns an error containing
-// [ResultRejected] without writing anything unless Paste.AllowUnsafe is true.
-// A reader failure returns an error containing both [ResultIOError] and the
-// original Go callback error.
+// Paste refuses text that could run commands without the user meaning to.
+// Normally that is text with a newline or carriage return, because the shell
+// treats either one like the user pressing Enter. When the program has turned
+// on bracketed paste mode, line breaks are safe, and only the sequence that
+// ends a bracketed paste is refused. Refused text returns an error matching
+// [ResultRejected] and nothing is written. Set Paste.AllowUnsafe to paste it
+// anyway.
+//
+// If the reader fails, the returned error matches both [ResultIOError] and
+// the error the reader returned.
 //
 // C: ghostty_terminal_paste
 func (t *Terminal) Paste(paste Paste) (bool, error) {
@@ -125,9 +131,16 @@ func (t *Terminal) Paste(paste Paste) (bool, error) {
 
 // PasteIsSafe reports whether data is safe to paste into a terminal.
 //
-// Ghostty's safety check is intentionally conservative: data containing
-// newlines or bracketed-paste end markers is considered unsafe because it can
-// inject commands into interactive programs. Empty data is safe.
+// Data is unsafe if it contains a newline or carriage return, because the
+// shell treats either one like the user pressing Enter and may run a
+// command. Data is also unsafe if it contains the sequence that ends a
+// bracketed paste (ESC [201~), because it lets the pasted text end the paste
+// early and run whatever follows as a command. Empty data is safe.
+//
+// PasteIsSafe is stricter than [Terminal.Paste]. It doesn't know whether the
+// terminal is in bracketed paste mode, so it treats line breaks as unsafe
+// even when Paste would allow them. Use it to warn the user about every
+// paste that contains a line break, whatever mode the terminal is in.
 func PasteIsSafe(data []byte) bool {
 	if len(data) == 0 {
 		return true

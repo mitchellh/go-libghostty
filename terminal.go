@@ -47,6 +47,7 @@ type Terminal struct {
 	onRenderHold          RenderHoldFunc
 	onSemanticPrompt      SemanticPromptFunc
 	onReset               ResetFunc
+	onWindowResize        WindowResizeFunc
 
 	// effectBuf holds C-allocated memory for the most recent response
 	// returned by an effect trampoline (e.g. enquiry, xtversion).
@@ -136,6 +137,7 @@ type TerminalConfig struct {
 	onRenderHold          RenderHoldFunc
 	onSemanticPrompt      SemanticPromptFunc
 	onReset               ResetFunc
+	onWindowResize        WindowResizeFunc
 }
 
 // ChecksumFlags controls how the terminal calculates screen checksums. Flags
@@ -540,9 +542,14 @@ type ProgramStatus struct {
 	Kind ProgramStatusKind
 
 	// Progress is how much of the work is done, as a percentage from 0
-	// through 100. It is only set when State is [ProgramStatusStateWorking]
-	// or [ProgramStatusStateBlocked]. It is -1 when the program didn't
-	// report progress.
+	// through 100. It is -1 when there is no percentage to show.
+	//
+	// Progress is only set when State is [ProgramStatusStateWorking] or
+	// [ProgramStatusStateBlocked]. For those states, -1 means the program
+	// is busy but doesn't know how far along it is. Show a spinner or a
+	// similar indicator instead of a progress bar. Progress is always -1
+	// for other states, and also when the program sent a number outside
+	// 0 through 100.
 	Progress int8
 
 	// ID names the record this report is about. Most programs only report
@@ -555,8 +562,14 @@ type ProgramStatus struct {
 	// The parent record doesn't have to exist.
 	ID string
 
-	// App is a short, stable name for the program, such as "cargo" or
-	// "terraform". It is meant for matching in code rather than for display.
+	// App is a short name for the program that doesn't change between
+	// reports, such as "cargo", "terraform", or "claude-code". Use it to
+	// group or filter records, or to choose an icon. Don't show it as a
+	// label. Show Title instead.
+	//
+	// App is empty when the report didn't include one. In that case the
+	// record should use the App of a parent record, as described in
+	// [ProgramStatusFunc]. The terminal doesn't do this for you.
 	App string
 
 	// Title is a short label for the record, meant for display. Programs
@@ -581,6 +594,9 @@ type ProgramStatus struct {
 //   - A [ProgramStatusStateClear] report removes the record with its ID and
 //     every record nested under it. Clearing "build" also removes
 //     "build/test". A clear report with an empty ID removes every record.
+//   - A record without an App uses the App of the closest parent record
+//     that has one. If the record with an empty ID has App "deploy" and the
+//     record "us-east" has no App, treat "us-east" as having App "deploy".
 //   - When a new shell prompt appears or the program exits, remove working
 //     and blocked records. Idle records may be removed too. Keep done and
 //     error records until the user has seen them, such as the next time
@@ -593,10 +609,16 @@ type ProgramStatus struct {
 // calls this function with a clear report and an empty ID before calling
 // the [ResetFunc].
 //
-// Programs check whether the terminal supports the protocol before sending
-// reports. The terminal answers that check only while a ProgramStatusFunc is
-// set, and it sends the answer through the [WritePtyFn]. Set both, or
-// programs will assume the protocol isn't supported.
+// A program can ask whether the terminal supports these reports. The
+// terminal replies with the states and kinds it understands:
+//
+//	program:  ESC ] 7501 ; ? ST
+//	terminal: ESC ] 7501 ; ?:states=idle,working,done,blocked,error:kinds=permission,question,auth ST
+//
+// The terminal only replies while a ProgramStatusFunc is set, and it sends
+// the reply through the [WritePtyFn], so set both. Without a reply, the
+// program assumes the terminal doesn't support reports. Programs don't have
+// to ask first. Reports sent while no ProgramStatusFunc is set are ignored.
 //
 // Title and Message never contain control characters, but they come from
 // the program and should not be trusted. Don't interpret them as markup. If
@@ -741,12 +763,78 @@ type SemanticPromptFunc func(t *Terminal, event TerminalSemanticPrompt)
 // status record. If a [ProgressReportFn] or [ProgramStatusFunc] is set, the
 // terminal calls it to report the removal before calling this function.
 //
-// This function is not called for a soft reset (CSI ! p), which only
-// restores a few modes. It is also not called for [Terminal.Reset], because
-// the application already knows when it resets the terminal itself.
+// This function is not called for a soft reset (CSI ! p), which keeps the
+// screen contents, title, and working directory. It is also not called for
+// [Terminal.Reset], because the application already knows when it resets
+// the terminal itself.
 //
 // C: GhosttyTerminalResetFn
 type ResetFunc func(t *Terminal)
+
+// WindowResizeKind describes what a [WindowResize] request asks for.
+//
+// Later versions of libghostty may add new kinds, so a [WindowResizeFunc]
+// should ignore kinds it does not recognize.
+//
+// C: GhosttyTerminalResizeWindowTag
+type WindowResizeKind int
+
+const (
+	// WindowResizeGrid asks for the window to be resized so that the
+	// terminal is a given number of rows and columns. The requested size is
+	// in the Rows and Columns fields of the [WindowResize].
+	WindowResizeGrid WindowResizeKind = C.GHOSTTY_TERMINAL_RESIZE_WINDOW_GRID
+)
+
+// WindowResize is a request from the running program to resize the window
+// that holds the terminal.
+//
+// Programs send these requests with an escape sequence. For example, a
+// program that wants the terminal to be 40 rows by 120 columns sends:
+//
+//	ESC [ 8 ; 40 ; 120 t
+//
+// That produces this request:
+//
+//	WindowResize{
+//		Kind:    WindowResizeGrid,
+//		Rows:    40,
+//		Columns: 120,
+//	}
+//
+// C: GhosttyTerminalResizeWindow
+type WindowResize struct {
+	// Kind is what the request asks for. It also says which of the other
+	// fields are set.
+	Kind WindowResizeKind
+
+	// Rows is the requested height in rows. It is only set when Kind is
+	// [WindowResizeGrid]. Zero means keep the current height.
+	Rows uint16
+
+	// Columns is the requested width in columns. It is only set when Kind is
+	// [WindowResizeGrid]. Zero means keep the current width.
+	Columns uint16
+}
+
+// WindowResizeFunc is called when the running program asks to resize the
+// window. See [WindowResize] for what a request contains. Check the
+// request's Kind first, because later versions of libghostty may report new
+// kinds of requests.
+//
+// The terminal does not resize itself. The application decides whether to
+// allow the request. To allow it, resize the window and then call
+// [Terminal.Resize] with the new size. Programs that resize the window
+// without asking can annoy users, so consider letting users turn this on
+// only if they want it.
+//
+// The function runs while the terminal processes output, so it should
+// return quickly. Don't call [Terminal.Resize] from inside the function.
+// Instead, remember the request and resize the terminal after
+// [Terminal.VTWrite] returns.
+//
+// C: GhosttyTerminalResizeWindowFn
+type WindowResizeFunc func(t *Terminal, request WindowResize)
 
 // TerminalUnknownSequenceTag identifies the kind of unsupported terminal
 // sequence reported by [UnknownSequenceFn]. Additional tags may be added by
@@ -877,7 +965,7 @@ type EnquiryFn func(t *Terminal) []byte
 // C: GhosttyTerminalXtversionFn
 type XtversionFn func(t *Terminal) string
 
-// SizeFn is called for XTWINOPS size queries (CSI 14/16/18 t) and when VT
+// SizeFn is called for XTWINOPS size queries (CSI 14/16/18/19 t) and when VT
 // input enables in-band size reports (mode 2048). Return the size and true,
 // or zero value and false to suppress the report.
 // C: GhosttyTerminalSizeFn
@@ -1129,6 +1217,15 @@ func WithReset(fn ResetFunc) TerminalOption {
 	}
 }
 
+// WithWindowResize sets fn as the function called when the running program
+// asks to resize the window. If fn is nil, these requests are ignored. See
+// [WindowResizeFunc] for details.
+func WithWindowResize(fn WindowResizeFunc) TerminalOption {
+	return func(c *TerminalConfig) {
+		c.onWindowResize = fn
+	}
+}
+
 // WithEnquiry registers an effect handler invoked when the terminal
 // receives an ENQ character (0x05). Return the response bytes; nil
 // or empty means no response.
@@ -1315,6 +1412,7 @@ func terminalFromC(cterm C.GhosttyTerminal, cfg TerminalConfig) *Terminal {
 		onRenderHold:          cfg.onRenderHold,
 		onSemanticPrompt:      cfg.onSemanticPrompt,
 		onReset:               cfg.onReset,
+		onWindowResize:        cfg.onWindowResize,
 	}
 }
 
@@ -1516,6 +1614,10 @@ const (
 	// ScrollViewportRow scrolls to an absolute row offset in the same
 	// coordinate space as [Scrollbar.Offset].
 	ScrollViewportRow ScrollViewportTag = C.GHOSTTY_SCROLL_VIEWPORT_ROW
+
+	// ScrollViewportPrompt scrolls by a number of shell prompts instead of
+	// a number of rows (up is negative). See [Terminal.ScrollViewportPrompt].
+	ScrollViewportPrompt ScrollViewportTag = C.GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT
 )
 
 // ScrollViewport scrolls the terminal viewport to the top of scrollback.
@@ -1550,6 +1652,30 @@ func (t *Terminal) ScrollViewportRow(row uint) {
 	sv.tag = C.GHOSTTY_SCROLL_VIEWPORT_ROW
 	// Set the row in the value union. The row field is at offset 0.
 	*(*C.size_t)(unsafe.Pointer(&sv.value[0])) = C.size_t(row)
+	C.ghostty_terminal_scroll_viewport(t.ptr, sv)
+}
+
+// ScrollViewportPrompt scrolls the viewport by delta shell prompts and
+// leaves the prompt it lands on at the top of the viewport. Prompts are
+// counted from the current top of the viewport. A negative delta moves up
+// to earlier prompts, and a positive delta moves down to later ones. This
+// lets users jump between the commands they ran instead of scrolling line
+// by line.
+//
+// The terminal only knows where prompts are if the shell marks them with
+// OSC 133 sequences. Ghostty's shell integration adds these marks. Without
+// them, the terminal finds no prompts and the viewport doesn't move.
+//
+// If delta is zero, or there are no prompts in that direction, the viewport
+// doesn't move. If there are fewer prompts than requested, the viewport
+// stops at the last one it finds. Moving down past the last prompt can
+// scroll all the way to the bottom of the screen, where new output appears.
+func (t *Terminal) ScrollViewportPrompt(delta int) {
+	var sv C.GhosttyTerminalScrollViewport
+	sv.tag = C.GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT
+	// Set the prompt delta in the value union. The delta_prompt field is
+	// at offset 0.
+	*(*C.intptr_t)(unsafe.Pointer(&sv.value[0])) = C.intptr_t(delta)
 	C.ghostty_terminal_scroll_viewport(t.ptr, sv)
 }
 

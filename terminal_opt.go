@@ -144,6 +144,14 @@ func (t *Terminal) SetEffectReset(fn ResetFunc) {
 	t.syncEffects()
 }
 
+// SetEffectWindowResize sets fn as the function called when the running
+// program asks to resize the window. Passing nil removes the current
+// function. See [WindowResizeFunc] for details.
+func (t *Terminal) SetEffectWindowResize(fn WindowResizeFunc) {
+	t.onWindowResize = fn
+	t.syncEffects()
+}
+
 // SetColorBackground sets the default background color. Pass nil to
 // clear (unset).
 func (t *Terminal) SetColorBackground(c *ColorRGB) error {
@@ -388,8 +396,9 @@ func (t *Terminal) SetKittyImageMediumSharedMem(enabled bool) error {
 	))
 }
 
-// SetMode sets the current value of a terminal mode without changing the
-// value restored by a full terminal reset.
+// SetMode sets the current value of a terminal mode. It doesn't change the
+// value the mode goes back to when the terminal is reset. Use
+// [Terminal.SetModeDefault] to change that.
 func (t *Terminal) SetMode(mode Mode, value bool) error {
 	config := C.GhosttyTerminalModeConfig{
 		mode:  C.GhosttyMode(mode),
@@ -402,10 +411,14 @@ func (t *Terminal) SetMode(mode Mode, value bool) error {
 	))
 }
 
-// SetModeDefault sets the reset default for a terminal mode. This
-// unconditionally updates both the current value and the value restored by a
-// full terminal reset. Modes that represent transitions or mirror other
-// terminal state return ResultInvalidValue.
+// SetModeDefault sets both the current value of a terminal mode and the
+// value it goes back to when the terminal is reset. A full reset (ESC c)
+// restores every mode, and a soft reset (CSI ! p) restores only some of
+// them.
+//
+// Some modes can't have a default because they trigger an action when
+// changed or reflect other terminal state. For those modes, SetModeDefault
+// returns an error matching [ErrInvalidValue].
 func (t *Terminal) SetModeDefault(mode Mode, value bool) error {
 	config := C.GhosttyTerminalModeConfig{
 		mode:  C.GhosttyMode(mode),
@@ -537,13 +550,14 @@ func (t *Terminal) SetChecksumReport(enabled bool) error {
 	))
 }
 
-// SetChecksumFlags sets how screen checksums are calculated. It changes the
-// current calculation and the one the terminal returns to after a full reset.
-// Zero, the default, calculates checksums the way a real DEC terminal does.
+// SetChecksumFlags sets how screen checksums are calculated. It changes both
+// the current calculation and the one the terminal goes back to when it is
+// reset. Zero, the default, calculates checksums the way a real DEC terminal
+// does.
 //
 // Running programs can change the calculation themselves with the
-// XTCHECKSUM sequence (CSI Ps # y). Their change lasts until the next full
-// reset, which restores flags.
+// XTCHECKSUM sequence (CSI Ps # y). Their change lasts until the terminal
+// is reset, which restores flags.
 //
 // SetChecksumFlags returns an error matching [ErrInvalidValue] if flags
 // contains bits other than the defined [ChecksumFlags] constants.

@@ -303,3 +303,59 @@ func TestTerminalModeVTWrite(t *testing.T) {
 		})
 	}
 }
+
+func TestTerminalScrollViewportPrompt(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 5), WithMaxScrollbackLines(1000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// Write three prompts, each followed by enough output to push the
+	// earlier prompts into scrollback. OSC 133;A marks each prompt start.
+	for i := 0; i < 3; i++ {
+		term.VTWrite([]byte("\x1b]133;A\x07$ cmd\r\n"))
+		for j := 0; j < 10; j++ {
+			term.VTWrite([]byte("output\r\n"))
+		}
+	}
+
+	offset := func() uint64 {
+		t.Helper()
+		sb, err := term.Scrollbar()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sb.Offset
+	}
+
+	bottom := offset()
+	if bottom == 0 {
+		t.Fatal("expected content in scrollback")
+	}
+
+	// Zero is a no-op.
+	term.ScrollViewportPrompt(0)
+	if got := offset(); got != bottom {
+		t.Fatalf("delta 0 moved viewport: %d, want %d", got, bottom)
+	}
+
+	// Each prompt is 11 rows apart, starting at row 0. Moving back one
+	// prompt from the active area lands on the last prompt (row 22).
+	term.ScrollViewportPrompt(-1)
+	if got := offset(); got != 22 {
+		t.Fatalf("delta -1: offset %d, want 22", got)
+	}
+
+	// Moving back past the first prompt clamps to the first prompt.
+	term.ScrollViewportPrompt(-10)
+	if got := offset(); got != 0 {
+		t.Fatalf("delta -10: offset %d, want 0", got)
+	}
+
+	// Moving forward one prompt lands on the second prompt.
+	term.ScrollViewportPrompt(1)
+	if got := offset(); got != 11 {
+		t.Fatalf("delta 1: offset %d, want 11", got)
+	}
+}

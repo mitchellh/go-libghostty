@@ -655,11 +655,17 @@ func TestTerminalProgramStatusQuery(t *testing.T) {
 		t.Fatalf("expected no reply without callback, got %q", written)
 	}
 
-	// With a callback set, the terminal answers the query.
+	// With a callback set, the terminal answers the query with "?"
+	// followed by the states and kinds it accepts.
 	term.SetEffectProgramStatus(func(_ *Terminal, _ ProgramStatus) {})
 	term.VTWrite([]byte("\x1b]7501;?\x1b\\"))
-	if !bytes.HasPrefix(written, []byte("\x1b]7501;")) {
+	if !bytes.HasPrefix(written, []byte("\x1b]7501;?:states=")) {
 		t.Fatalf("expected OSC 7501 reply, got %q", written)
+	}
+	for _, want := range []string{"working", "blocked", ":kinds=", "permission"} {
+		if !bytes.Contains(written, []byte(want)) {
+			t.Fatalf("expected reply to contain %q, got %q", want, written)
+		}
 	}
 }
 
@@ -1357,5 +1363,69 @@ func TestTerminalSetEffectReset(t *testing.T) {
 	term.VTWrite([]byte("\x1bc"))
 	if count != 1 {
 		t.Fatalf("expected 1 reset, got %d", count)
+	}
+}
+
+func TestTerminalWithWindowResize(t *testing.T) {
+	var requests []WindowResize
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithWindowResize(func(_ *Terminal, request WindowResize) {
+			requests = append(requests, request)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// CSI 8 ; rows ; columns t asks for a text area size. A zero (or
+	// omitted) dimension means keep the current size.
+	term.VTWrite([]byte("\x1b[8;40;120t"))
+	term.VTWrite([]byte("\x1b[8;0;100t"))
+
+	want := []WindowResize{
+		{Kind: WindowResizeGrid, Rows: 40, Columns: 120},
+		{Kind: WindowResizeGrid, Rows: 0, Columns: 100},
+	}
+	if len(requests) != len(want) {
+		t.Fatalf("expected %d requests, got %#v", len(want), requests)
+	}
+	for i := range want {
+		if requests[i] != want[i] {
+			t.Fatalf("request %d: got %#v, want %#v", i, requests[i], want[i])
+		}
+	}
+
+	// The request alone doesn't resize the terminal.
+	cols, err := term.Cols()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := term.Rows()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cols != 80 || rows != 24 {
+		t.Fatalf("expected terminal to stay 80x24, got %dx%d", cols, rows)
+	}
+}
+
+func TestTerminalSetEffectWindowResize(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	count := 0
+	term.SetEffectWindowResize(func(_ *Terminal, _ WindowResize) { count++ })
+	term.VTWrite([]byte("\x1b[8;40;120t"))
+
+	// Clearing the callback stops further notifications immediately.
+	term.SetEffectWindowResize(nil)
+	term.VTWrite([]byte("\x1b[8;40;120t"))
+	if count != 1 {
+		t.Fatalf("expected 1 resize request, got %d", count)
 	}
 }

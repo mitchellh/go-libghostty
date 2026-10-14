@@ -31,6 +31,7 @@ extern void goUnknownSequenceTrampoline(GhosttyTerminal, void*, GhosttyTerminalU
 extern void goRenderHoldTrampoline(GhosttyTerminal, void*, bool);
 extern void goSemanticPromptTrampoline(GhosttyTerminal, void*, GhosttyTerminalSemanticPrompt*);
 extern void goResetTrampoline(GhosttyTerminal, void*);
+extern void goWindowResizeTrampoline(GhosttyTerminal, void*, GhosttyTerminalResizeWindow*);
 
 // Helpers to set each effect via ghostty_terminal_set.
 // We need these because cgo cannot take the address of a Go-exported
@@ -89,6 +90,9 @@ static inline GhosttyResult set_semantic_prompt(GhosttyTerminal t) {
 static inline GhosttyResult set_reset(GhosttyTerminal t) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_RESET, (const void*)goResetTrampoline);
 }
+static inline GhosttyResult set_resize_window(GhosttyTerminal t) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_RESIZE_WINDOW, (const void*)goWindowResizeTrampoline);
+}
 
 // Convert the integer cgo.Handle to native userdata only after control enters
 // C. A handle is not a valid pointer and must never occupy an unsafe.Pointer
@@ -111,6 +115,12 @@ static inline const GhosttyTerminalUnknownStringSequence* unknown_sequence_apc(
 static inline const GhosttyTerminalUnknownOscSequence* unknown_sequence_osc(
 		const GhosttyTerminalUnknownSequence* sequence) {
 	return &sequence->value.osc;
+}
+
+// Return the grid member only after checking the request tag in Go.
+static inline const GhosttyTerminalResizeWindowGrid* resize_window_grid(
+		const GhosttyTerminalResizeWindow* request) {
+	return &request->value.grid;
 }
 
 // Helper to clear an effect by setting it to NULL.
@@ -238,6 +248,11 @@ func (t *Terminal) syncEffects() {
 	} else {
 		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_RESET)
 	}
+	if t.onWindowResize != nil {
+		C.set_resize_window(t.ptr)
+	} else {
+		C.clear_effect(t.ptr, C.GHOSTTY_TERMINAL_OPT_RESIZE_WINDOW)
+	}
 }
 
 // hasEffects reports whether any native effect trampoline needs to recover
@@ -260,7 +275,8 @@ func (t *Terminal) hasEffects() bool {
 		t.onUnknownSequence != nil ||
 		t.onRenderHold != nil ||
 		t.onSemanticPrompt != nil ||
-		t.onReset != nil
+		t.onReset != nil ||
+		t.onWindowResize != nil
 }
 
 // terminalFromUserdata recovers a *Terminal from the C userdata pointer.
@@ -730,6 +746,30 @@ func goResetTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer) {
 	if t.onReset != nil {
 		t.onReset(t)
 	}
+}
+
+//export goWindowResizeTrampoline
+func goWindowResizeTrampoline(
+	_ C.GhosttyTerminal,
+	userdata unsafe.Pointer,
+	request *C.GhosttyTerminalResizeWindow,
+) {
+	t := terminalFromUserdata(userdata)
+	if t.onWindowResize == nil || request == nil {
+		return
+	}
+
+	// Only read the union member that matches the tag. Requests with an
+	// unknown tag are still delivered, with only Kind set, so the callback
+	// can see and ignore them.
+	resize := WindowResize{Kind: WindowResizeKind(request.tag)}
+	if resize.Kind == WindowResizeGrid {
+		grid := C.resize_window_grid(request)
+		resize.Rows = uint16(grid.rows)
+		resize.Columns = uint16(grid.columns)
+	}
+
+	t.onWindowResize(t, resize)
 }
 
 //export goEnquiryTrampoline
