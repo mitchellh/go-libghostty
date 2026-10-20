@@ -34,7 +34,7 @@ func TestOSCCommandTypesLatestProtocols(t *testing.T) {
 	types := []OSCCommandType{
 		OSCCommandKittyClipboardProtocol,
 		OSCCommandKittyDNDProtocol,
-		OSCCommandContextSignal,
+		OSCCommandHierarchicalContext,
 		OSCCommandKittyDesktopNotification,
 	}
 	seen := make(map[OSCCommandType]struct{}, len(types))
