@@ -384,8 +384,12 @@ func WithSelectionUnwrap(unwrap bool) SelectionFormatOption {
 	}
 }
 
-// WithSelectionTrim enables trimming trailing whitespace on non-blank
-// lines.
+// WithSelectionTrim controls whether trailing whitespace is removed from
+// lines that contain text.
+//
+// Blank lines at the end of the output are always removed. The one
+// exception is [FormatterFormatVT] output with trim set to false, which
+// keeps those lines so that the output reproduces the screen layout.
 func WithSelectionTrim(trim bool) SelectionFormatOption {
 	return func(o *selectionFormatOpts) {
 		o.c.trim = C.bool(trim)

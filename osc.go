@@ -90,8 +90,18 @@ const (
 	// OSCCommandKittyDNDProtocol uses Kitty's drag-and-drop protocol.
 	OSCCommandKittyDNDProtocol OSCCommandType = C.GHOSTTY_OSC_COMMAND_KITTY_DND_PROTOCOL
 
-	// OSCCommandContextSignal carries a terminal context signal.
-	OSCCommandContextSignal OSCCommandType = C.GHOSTTY_OSC_COMMAND_CONTEXT_SIGNAL
+	// OSCCommandHierarchicalContext is an OSC 3008 hierarchical context
+	// command. Programs use it to tell the terminal when they enter or
+	// leave a context, such as a shell session or a command, and to
+	// attach details about that context. Contexts can nest inside each
+	// other. See https://uapi-group.org/specifications/specs/osc_context/.
+	OSCCommandHierarchicalContext OSCCommandType = C.GHOSTTY_OSC_COMMAND_HIERARCHICAL_CONTEXT
+
+	// OSCCommandContextSignal is the old name for
+	// OSCCommandHierarchicalContext.
+	//
+	// Deprecated: Use [OSCCommandHierarchicalContext] instead.
+	OSCCommandContextSignal = OSCCommandHierarchicalContext
 
 	// OSCCommandKittyDesktopNotification uses Kitty's desktop notification protocol.
 	OSCCommandKittyDesktopNotification OSCCommandType = C.GHOSTTY_OSC_COMMAND_KITTY_DESKTOP_NOTIFICATION

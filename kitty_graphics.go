@@ -23,6 +23,8 @@ import "C"
 
 import (
 	"errors"
+	"math"
+	"time"
 	"unsafe"
 )
 
@@ -413,6 +415,72 @@ func (kg *KittyGraphics) Generation() (uint64, error) {
 		return 0, err
 	}
 	return uint64(generation), nil
+}
+
+// AdvanceAnimations moves every playing Kitty graphics animation to the
+// frame that is due at time now. It reports whether any animation is
+// still playing and, if so, the time its next frame is due.
+//
+// Programs can send images with several frames, much like an animated
+// GIF, and ask the terminal to play them. The terminal stores the frames
+// but has no timer of its own. Instead, the renderer calls
+// AdvanceAnimations once each time it prepares a frame to draw.
+//
+// Both now and next are measured on a clock that the caller chooses, as
+// the time elapsed since some fixed starting point. A good choice is the
+// time since the application started. Keep the same starting point for
+// as long as the terminal exists, and never pass a time earlier than one
+// passed before. Times are rounded down to whole milliseconds.
+//
+// If ok is true, schedule a single redraw at time next and call
+// AdvanceAnimations again from that redraw. Don't schedule redraws
+// closer together than the display's refresh interval, which is about
+// 8 milliseconds at 120 Hz. If ok is false, nothing is playing and
+// there is nothing to schedule. ok is always false if libghostty was
+// built without Kitty graphics support.
+//
+// There is no need to watch for animations starting. A program starts an
+// animation by writing to the terminal, and the redraw that follows that
+// write calls AdvanceAnimations, which picks up the new animation.
+//
+// Each animation moves forward by at most one frame per call. If calls
+// arrive late, playback slows down rather than skipping frames.
+//
+// When an image moves to a new frame, its [KittyGraphicsImage.Generation]
+// changes and [KittyGraphicsImage.Data] returns the pixels of the new
+// frame. A renderer that already caches textures by generation shows new
+// frames with no extra work.
+//
+// AdvanceAnimations changes the stored images. Like [Terminal.VTWrite],
+// it invalidates any [KittyGraphicsImage] and pixel data obtained before
+// the call, so look images up again afterwards. kg itself stays valid.
+func (kg *KittyGraphics) AdvanceAnimations(now time.Duration) (next time.Duration, ok bool, err error) {
+	// The C API takes whole milliseconds as an unsigned integer. Treat a
+	// negative time as the start of the clock rather than letting it wrap
+	// around to a time far in the future.
+	nowMs := max(now.Milliseconds(), 0)
+
+	var nextMs C.uint64_t
+	err = resultError(C.ghostty_kitty_graphics_animation_tick(
+		kg.ptr,
+		C.uint64_t(nowMs),
+		&nextMs,
+	))
+	if errors.Is(err, ErrNoValue) {
+		// Nothing is playing. This is the normal idle state, not a failure.
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+
+	// libghostty saturates the next time instead of overflowing. Do the
+	// same when converting to a Duration, which has a smaller range.
+	const maxMs = uint64(math.MaxInt64 / int64(time.Millisecond))
+	if uint64(nextMs) > maxMs {
+		return time.Duration(math.MaxInt64), true, nil
+	}
+	return time.Duration(nextMs) * time.Millisecond, true, nil
 }
 
 // Image looks up a Kitty graphics image by its image ID. Returns nil

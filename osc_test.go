@@ -34,7 +34,7 @@ func TestOSCCommandTypesLatestProtocols(t *testing.T) {
 	types := []OSCCommandType{
 		OSCCommandKittyClipboardProtocol,
 		OSCCommandKittyDNDProtocol,
-		OSCCommandContextSignal,
+		OSCCommandHierarchicalContext,
 		OSCCommandKittyDesktopNotification,
 	}
 	seen := make(map[OSCCommandType]struct{}, len(types))
@@ -46,6 +46,11 @@ func TestOSCCommandTypesLatestProtocols(t *testing.T) {
 			t.Fatalf("duplicate OSC command type value %d", commandType)
 		}
 		seen[commandType] = struct{}{}
+	}
+
+	// The deprecated name must keep matching the command it was renamed to.
+	if OSCCommandContextSignal != OSCCommandHierarchicalContext {
+		t.Fatal("expected OSCCommandContextSignal to alias OSCCommandHierarchicalContext")
 	}
 }
 

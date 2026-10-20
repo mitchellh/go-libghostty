@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/png"
 	"testing"
+	"time"
 )
 
 // testDecodePng is a minimal SysDecodePngFn for tests. It avoids
@@ -629,5 +630,117 @@ func TestKittyGraphicsPlacementViewportPos(t *testing.T) {
 	// Position should be non-negative for a freshly placed image.
 	if col < 0 || row < 0 {
 		t.Fatalf("expected non-negative viewport position, got col=%d row=%d", col, row)
+	}
+}
+
+func TestKittyGraphicsAdvanceAnimations(t *testing.T) {
+	term := newKittyTerminal(t)
+	defer term.Close()
+
+	kg, err := term.KittyGraphics()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Empty storage has nothing to play.
+	if _, ok, err := kg.AdvanceAnimations(0); err != nil || ok {
+		t.Fatalf("empty storage: ok=%v err=%v", ok, err)
+	}
+
+	// Place a red 1x1 RGBA image and add a blue second frame shown for
+	// 40ms. The first frame starts with no display time, so give it
+	// 30ms, then start looping playback. Mirrors the upstream C API test.
+	term.VTWrite([]byte(
+		"\x1b_Ga=T,f=32,i=1,s=1,v=1,c=1,r=1;/wAA/w==\x1b\\" +
+			"\x1b_Ga=f,f=32,i=1,s=1,v=1,z=40;AAD//w==\x1b\\" +
+			"\x1b_Ga=a,i=1,r=1,z=30\x1b\\" +
+			"\x1b_Ga=a,i=1,s=3\x1b\\",
+	))
+	kg, err = term.KittyGraphics()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// snapshot looks the image up again (advancing invalidates image handles)
+	// and returns its generation and first pixel.
+	type snap struct {
+		gen   uint64
+		pixel [4]byte
+	}
+	snapshot := func() snap {
+		t.Helper()
+		img := kg.Image(1)
+		if img == nil {
+			t.Fatal("expected image 1")
+		}
+		gen, err := img.Generation()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := img.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return snap{gen: gen, pixel: [4]byte(data[:4])}
+	}
+	advance := func(now, want time.Duration) {
+		t.Helper()
+		next, ok, err := kg.AdvanceAnimations(now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok || next != want {
+			t.Fatalf("AdvanceAnimations(%v) = %v, %v, want %v, true",
+				now, next, ok, want)
+		}
+	}
+	const ms = time.Millisecond
+	red := [4]byte{255, 0, 0, 255}
+	blue := [4]byte{0, 0, 255, 255}
+
+	// The first call starts the first frame's 30ms timer.
+	s0 := snapshot()
+	if s0.pixel != red {
+		t.Fatalf("expected red, got %v", s0.pixel)
+	}
+	advance(1000*ms, 1030*ms)
+	if got := snapshot(); got != s0 {
+		t.Fatalf("first call changed image: %+v -> %+v", s0, got)
+	}
+
+	// An early call changes nothing and reports the same time.
+	advance(1010*ms, 1030*ms)
+
+	// Times are rounded down to whole milliseconds, so this is still early.
+	advance(1029*ms+999*time.Microsecond, 1030*ms)
+	if got := snapshot(); got != s0 {
+		t.Fatalf("early call changed image: %+v -> %+v", s0, got)
+	}
+
+	// On time, the blue frame shows with a new generation.
+	advance(1030*ms, 1070*ms)
+	s1 := snapshot()
+	if s1.pixel != blue || s1.gen <= s0.gen {
+		t.Fatalf("expected blue with newer generation, got %+v (prev %+v)", s1, s0)
+	}
+
+	// It then loops back to the first frame.
+	advance(1070*ms, 1100*ms)
+	s2 := snapshot()
+	if s2.pixel != red || s2.gen <= s1.gen {
+		t.Fatalf("expected red with newer generation, got %+v (prev %+v)", s2, s1)
+	}
+
+	// After a stop command, nothing is playing and the image is untouched.
+	term.VTWrite([]byte("\x1b_Ga=a,i=1,s=1\x1b\\"))
+	kg, err = term.KittyGraphics()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := kg.AdvanceAnimations(1100 * ms); err != nil || ok {
+		t.Fatalf("after stop: ok=%v err=%v", ok, err)
+	}
+	if got := snapshot(); got != s2 {
+		t.Fatalf("call after stop changed image: %+v -> %+v", s2, got)
 	}
 }
