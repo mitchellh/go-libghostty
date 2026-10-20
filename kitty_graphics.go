@@ -900,6 +900,10 @@ func (it *KittyGraphicsPlacementIterator) PlacementID() (uint32, error) {
 
 // IsVirtual reports whether the current placement is a virtual
 // (unicode placeholder) placement.
+//
+// A virtual placement has no position of its own. It is drawn wherever
+// the terminal shows placeholder cells for it, so use
+// [RenderStateImageIterator] to find where to draw it.
 func (it *KittyGraphicsPlacementIterator) IsVirtual() (bool, error) {
 	var v C.bool
 	if err := resultError(C.ghostty_kitty_graphics_placement_get(
@@ -1124,7 +1128,8 @@ func (it *KittyGraphicsPlacementIterator) Info() (*KittyGraphicsPlacementInfo, e
 //
 // When ViewportVisible is false, the placement is fully off-screen or
 // is a virtual placement; ViewportCol and ViewportRow may contain
-// meaningless values in that case.
+// meaningless values in that case. To get the same information for
+// virtual placements, use [RenderStateImageIterator].
 func (it *KittyGraphicsPlacementIterator) RenderInfo(img *KittyGraphicsImage, t *Terminal) (*KittyGraphicsPlacementRenderInfo, error) {
 	ci := C.init_kitty_placement_render_info()
 	if err := resultError(C.ghostty_kitty_graphics_placement_render_info(
@@ -1204,7 +1209,8 @@ func (it *KittyGraphicsPlacementIterator) GridSize(img *KittyGraphicsImage, t *T
 // ViewportPos returns the viewport-relative grid position of the
 // current placement. The row can be negative for partially visible
 // placements. Returns an error with ResultNoValue when fully
-// off-screen or for virtual placements.
+// off-screen or for virtual placements. To position virtual placements
+// and the placements attached to them, use [RenderStateImageIterator].
 func (it *KittyGraphicsPlacementIterator) ViewportPos(img *KittyGraphicsImage, t *Terminal) (col, row int32, err error) {
 	var c, r C.int32_t
 	if err := resultError(C.ghostty_kitty_graphics_placement_viewport_pos(

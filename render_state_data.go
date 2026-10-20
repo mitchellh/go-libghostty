@@ -56,6 +56,11 @@ const (
 	// (GhosttyRenderStateRowIterator).
 	RenderStateDataRowIterator RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR
 
+	// RenderStateDataImageIterator fills an existing image iterator with
+	// the image placements from the last update
+	// (GhosttyRenderStateImageIterator).
+	RenderStateDataImageIterator RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR
+
 	// RenderStateDataColorBackground is the default/current background
 	// color (GhosttyColorRgb).
 	RenderStateDataColorBackground RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_COLOR_BACKGROUND
@@ -368,6 +373,21 @@ func (rs *RenderState) Dirty() (RenderStateDirty, error) {
 		return 0, err
 	}
 	return RenderStateDirty(v), nil
+}
+
+// ImageIterator fills iter with the images to draw from the last update.
+// Call [RenderStateImageIterator.Next] to move to the first image before
+// reading any values.
+//
+// The values in iter stay valid until the next call to [RenderState.Update].
+// Call ImageIterator again after every update. The same iterator can be
+// reused each time.
+func (rs *RenderState) ImageIterator(iter *RenderStateImageIterator) error {
+	return resultError(C.ghostty_render_state_get(
+		rs.ptr,
+		C.GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR,
+		unsafe.Pointer(&iter.ptr),
+	))
 }
 
 // RowIterator initializes ri to iterate over the rows from the last update.
