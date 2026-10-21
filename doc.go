@@ -55,7 +55,7 @@
 // [Terminal.SetEffectWritePty] and friends.
 //
 // Effect callbacks run synchronously during [Terminal.VTWrite] and
-// [Terminal.VTWriteUntilGround]. They must not call either VT write method
+// [Terminal.VTWriteUntil]. They must not call either VT write method
 // on the same terminal and should avoid blocking for long periods.
 //
 // Use [WithRenderHold] when creating a terminal or

@@ -153,6 +153,16 @@ func restoreIncrementally(snapshot []byte) error {
 		if err != nil {
 			return fmt.Errorf("read history progress: %w", err)
 		}
+		if progress.Kind == libghostty.SnapshotDecoderProgressKindImage {
+			// Kitty graphics pixels can arrive between history pages.
+			fmt.Printf(
+				"  image %d frame %d: restored %d pixel bytes\n",
+				progress.ImageID,
+				progress.ImageFrame,
+				progress.ImageBytes,
+			)
+			continue
+		}
 		pages++
 		restoredRows += progress.Rows
 		fmt.Printf(

@@ -2,6 +2,34 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
+
+// ghostty_go_vt_write_until_result returns the result of
+// ghostty_terminal_vt_write_until to Go by value. Passing a Go pointer for
+// the GhosttyTerminalWriteStop out parameter would move it to the Go heap
+// on every call, and callers make one call per boundary while processing
+// all of a terminal's output.
+typedef struct {
+	GhosttyResult result;
+	GhosttyTerminalWriteStop stop;
+} ghostty_go_vt_write_until_result;
+
+static inline ghostty_go_vt_write_until_result
+ghostty_go_terminal_vt_write_until(
+	GhosttyTerminal terminal,
+	const uint8_t* data,
+	size_t len,
+	uint32_t boundaries
+) {
+	ghostty_go_vt_write_until_result out;
+	out.stop = GHOSTTY_INIT_SIZED(GhosttyTerminalWriteStop);
+	out.result = ghostty_terminal_vt_write_until(
+		terminal,
+		data,
+		len,
+		boundaries,
+		&out.stop);
+	return out;
+}
 */
 import "C"
 
@@ -13,10 +41,10 @@ import (
 // Terminal wraps a Ghostty VT terminal handle.
 // It is stateful, not safe for concurrent use, and not reentrant.
 // Serialize all calls that access a terminal. This includes getters, setters,
-// [Terminal.VTWrite], [Terminal.VTWriteUntilGround], [Terminal.Resize],
+// [Terminal.VTWrite], [Terminal.VTWriteUntil], [Terminal.Resize],
 // [Terminal.Close], and operations on borrowed handles derived from the
 // terminal. Effect callbacks run synchronously during terminal operations. They
-// must not call [Terminal.VTWrite] or [Terminal.VTWriteUntilGround] on the same
+// must not call [Terminal.VTWrite] or [Terminal.VTWriteUntil] on the same
 // terminal.
 // Individual callback types document other operations that are safe during a
 // callback. Clipboard callbacks may block to mediate user permission because
@@ -929,7 +957,7 @@ type UnknownSequenceFn func(t *Terminal, sequence TerminalUnknownSequence)
 // Changing [ModeSyncOutput] with [Terminal.SetMode] does not call the function.
 //
 // The function runs synchronously on the goroutine that triggered it. Most
-// often that is [Terminal.VTWrite] or [Terminal.VTWriteUntilGround] processing
+// often that is [Terminal.VTWrite] or [Terminal.VTWriteUntil] processing
 // VT input, but [Terminal.Reset] and [Terminal.Resize] also call it with held
 // false before they return when they end an active hold. Do not hold a lock
 // across those calls that the function also needs, or it will deadlock.
@@ -1555,7 +1583,7 @@ func (t *Terminal) Compress(mode TerminalCompressionMode) (TerminalCompressionRe
 // updating terminal state. Malformed input is handled gracefully and
 // will not cause an error. Effect callbacks run synchronously before
 // this call returns; they must not call [Terminal.VTWrite] or
-// [Terminal.VTWriteUntilGround] on the same terminal.
+// [Terminal.VTWriteUntil] on the same terminal.
 func (t *Terminal) VTWrite(data []byte) {
 	if len(data) == 0 {
 		return
@@ -1563,31 +1591,82 @@ func (t *Terminal) VTWrite(data []byte) {
 	C.ghostty_terminal_vt_write(t.ptr, (*C.uint8_t)(&data[0]), C.size_t(len(data)))
 }
 
-// VTWriteUntilGround feeds only the shortest prefix of data needed for the
-// terminal's VT parser to return to its ground state. Ground is the stateless
-// point between UTF-8 codepoints and VT sequences where callers can safely
-// insert out-of-band VT data.
+// VTWriteUntil is like [Terminal.VTWrite], but it stops right after the
+// first byte that reaches one of the given boundaries. Combine
+// [TerminalBoundary] values with | to stop at any of several boundaries.
 //
-// If the parser is already at ground, the method consumes zero bytes and
-// leaves data untouched. If all of data is consumed without reaching ground,
-// consumed is len(data) and the returned error has [ResultNoValue]. Effect
-// callbacks run synchronously for the consumed prefix only and must not call
-// either VT write method on the same terminal.
-// C: ghostty_terminal_vt_write_until_ground
-func (t *Terminal) VTWriteUntilGround(data []byte) (consumed int, err error) {
+// VTWriteUntil uses the same parser that updates the terminal, so it reports
+// exactly where each APC, DCS, and OSC string starts and ends. A program that
+// sits between a shell and a terminal can use this to forward, rewrite, or
+// drop particular strings. It can also wait for [TerminalBoundaryGround] to
+// find a safe point to insert its own escape sequences.
+//
+// The terminal processes only the first stop.Consumed bytes of data, and
+// effect callbacks run only for those bytes. Pass the remaining bytes to the
+// next call. Writing data this way, one stop at a time, leaves the terminal
+// in the same state as writing all of it with [Terminal.VTWrite].
+//
+// If no boundary is reached, VTWriteUntil consumes all of data and returns a
+// stop with Reached set to zero. An error is returned only if boundaries is
+// zero or includes undefined values. In that case nothing is consumed.
+//
+// [TerminalBoundaryGround] is a state, not a byte. If the stream is already
+// at ground, VTWriteUntil returns right away and consumes nothing, so asking
+// for ground again with the same input never makes progress. After a ground
+// stop, write the next bytes without asking for ground.
+//
+// This loop finds the content of every APC string in a chunk of output:
+//
+//	want := TerminalBoundaryAPCStart | TerminalBoundaryAPCEnd
+//	for len(data) > 0 {
+//		stop, err := term.VTWriteUntil(data, want)
+//		if err != nil {
+//			return err
+//		}
+//		data = data[stop.Consumed:]
+//		if stop.Reached&TerminalBoundaryAPCStart != 0 {
+//			// The content of the string starts at data[0].
+//		}
+//		if stop.Reached&TerminalBoundaryAPCEnd != 0 {
+//			// The last byte consumed ended the string.
+//		}
+//	}
+//
+// A string can start in one chunk and end in a later one, so keep track of
+// whether you are inside a string across calls.
+//
+// VTWriteUntil does not allocate, so it is suitable for processing all of a
+// terminal's output. Effect callbacks must not call VTWrite or VTWriteUntil
+// on the same terminal.
+// C: ghostty_terminal_vt_write_until
+func (t *Terminal) VTWriteUntil(data []byte, boundaries TerminalBoundary) (TerminalWriteStop, error) {
 	var ptr *C.uint8_t
 	if len(data) > 0 {
 		ptr = (*C.uint8_t)(unsafe.Pointer(&data[0]))
 	}
 
-	var out C.size_t
-	result := C.ghostty_terminal_vt_write_until_ground(
+	out := C.ghostty_go_terminal_vt_write_until(
 		t.ptr,
 		ptr,
 		C.size_t(len(data)),
-		&out,
+		C.uint32_t(boundaries),
 	)
-	return int(out), resultError(result)
+
+	// GHOSTTY_NO_VALUE means all input was consumed without reaching a
+	// boundary. That is a normal result, not an error, and the stop already
+	// reports it with Reached set to zero.
+	if out.result != C.GHOSTTY_SUCCESS && out.result != C.GHOSTTY_NO_VALUE {
+		return TerminalWriteStop{}, resultError(out.result)
+	}
+
+	return TerminalWriteStop{
+		Consumed:   int(out.stop.consumed),
+		Reached:    TerminalBoundary(out.stop.reached),
+		Kind:       TerminalStringKind(out.stop.kind),
+		Introducer: TerminalStringIntroducer(out.stop.introducer),
+		End:        TerminalStringEnd(out.stop.end),
+		Byte:       byte(out.stop.byte),
+	}, nil
 }
 
 // Write implements io.Writer by feeding data through the terminal's
@@ -1677,6 +1756,187 @@ func (t *Terminal) ScrollViewportPrompt(delta int) {
 	// at offset 0.
 	*(*C.intptr_t)(unsafe.Pointer(&sv.value[0])) = C.intptr_t(delta)
 	C.ghostty_terminal_scroll_viewport(t.ptr, sv)
+}
+
+// TerminalBoundary is a point in the VT stream where [Terminal.VTWriteUntil]
+// can stop. The values are bit flags, so you can combine them with | to stop
+// at any of several boundaries.
+//
+// Most boundaries are the first or last byte of a control string. A control
+// string is an APC, DCS, or OSC sequence. It has an introducer, some content,
+// and a terminator. [TerminalBoundaryGround] is different. It is the state
+// between sequences, not a byte inside one.
+//
+// Control bytes can be written two ways, and both are recognized. The 7-bit
+// form is ESC followed by one byte, such as "ESC ]" to start an OSC string.
+// The 8-bit form is a single byte from 0x80 to 0x9F, such as 0x9D.
+// C: GhosttyTerminalBoundary
+type TerminalBoundary uint32
+
+const (
+	// TerminalBoundaryGround is reached when the stream is not in the
+	// middle of an escape sequence or a multi-byte UTF-8 character. It is
+	// safe to insert your own escape sequences at this point.
+	//
+	// If the stream is already at ground, VTWriteUntil stops right away
+	// and consumes nothing.
+	TerminalBoundaryGround TerminalBoundary = C.GHOSTTY_TERMINAL_BOUNDARY_GROUND
+
+	// TerminalBoundaryAPCStart is the byte that starts an APC string. That
+	// is '_' after ESC, or the single byte 0x9F.
+	//
+	// SOS and PM strings report this boundary too, because the terminal
+	// treats all three the same way. Use [TerminalWriteStop.Byte] to tell
+	// them apart.
+	TerminalBoundaryAPCStart TerminalBoundary = C.GHOSTTY_TERMINAL_BOUNDARY_APC_START
+
+	// TerminalBoundaryAPCEnd is the byte that ends an APC, SOS, or PM
+	// string.
+	TerminalBoundaryAPCEnd TerminalBoundary = C.GHOSTTY_TERMINAL_BOUNDARY_APC_END
+
+	// TerminalBoundaryDCSStart is the byte that starts a DCS string. That
+	// is 'P' after ESC, or the single byte 0x90. The DCS header comes right
+	// after this byte, followed by the content. For "ESC P 1;2|data ESC \",
+	// the header is "1;2|" and the content is "data".
+	TerminalBoundaryDCSStart TerminalBoundary = C.GHOSTTY_TERMINAL_BOUNDARY_DCS_START
+
+	// TerminalBoundaryDCSEnd is the byte that ends a DCS string. A DCS
+	// string can end before its header is complete, in which case it has
+	// no content.
+	TerminalBoundaryDCSEnd TerminalBoundary = C.GHOSTTY_TERMINAL_BOUNDARY_DCS_END
+
+	// TerminalBoundaryOSCStart is the byte that starts an OSC string. That
+	// is ']' after ESC, or the single byte 0x9D.
+	TerminalBoundaryOSCStart TerminalBoundary = C.GHOSTTY_TERMINAL_BOUNDARY_OSC_START
+
+	// TerminalBoundaryOSCEnd is the byte that ends an OSC string. It is
+	// reported for every OSC string, including ones the terminal does not
+	// recognize.
+	TerminalBoundaryOSCEnd TerminalBoundary = C.GHOSTTY_TERMINAL_BOUNDARY_OSC_END
+)
+
+// TerminalStringKind is the kind of a control string.
+// C: GhosttyTerminalStringKind
+type TerminalStringKind int
+
+const (
+	// TerminalStringKindAPC is an APC, SOS, or PM string. To tell which,
+	// check [TerminalWriteStop.Byte] when the string starts. It is '_' or
+	// 0x9F for APC, 'X' or 0x98 for SOS, and '^' or 0x9E for PM.
+	TerminalStringKindAPC TerminalStringKind = C.GHOSTTY_TERMINAL_STRING_KIND_APC
+
+	// TerminalStringKindDCS is a DCS string. It starts with 'P' after ESC,
+	// or the single byte 0x90.
+	TerminalStringKindDCS TerminalStringKind = C.GHOSTTY_TERMINAL_STRING_KIND_DCS
+
+	// TerminalStringKindOSC is an OSC string. It starts with ']' after ESC,
+	// or the single byte 0x9D.
+	TerminalStringKindOSC TerminalStringKind = C.GHOSTTY_TERMINAL_STRING_KIND_OSC
+)
+
+// TerminalStringIntroducer is how a control string started.
+// C: GhosttyTerminalStringIntroducer
+type TerminalStringIntroducer int
+
+const (
+	// TerminalStringIntroducerESC means the string started with ESC
+	// followed by one byte, such as '_' or ']'. Only that second byte is
+	// counted in [TerminalWriteStop.Consumed], because the ESC may have
+	// been passed in an earlier call.
+	TerminalStringIntroducerESC TerminalStringIntroducer = C.GHOSTTY_TERMINAL_STRING_INTRODUCER_ESC
+
+	// TerminalStringIntroducerC1 means the string started with a single
+	// 8-bit byte, such as 0x9F or 0x9D.
+	//
+	// When the stream is at ground, these bytes are read as part of UTF-8
+	// text and do not start a string. They only start a string when they
+	// arrive inside another escape sequence.
+	TerminalStringIntroducerC1 TerminalStringIntroducer = C.GHOSTTY_TERMINAL_STRING_INTRODUCER_C1
+)
+
+// TerminalStringEnd is how a control string ended.
+// C: GhosttyTerminalStringEnd
+type TerminalStringEnd int
+
+const (
+	// TerminalStringEndESC means the string ended with ESC, the first byte
+	// of the two-byte terminator "ESC \".
+	//
+	// VTWriteUntil consumes the ESC but not the backslash. Pass the
+	// backslash as the first byte of your next call, where it completes
+	// the terminator. If you forward strings to another program, the ESC
+	// is part of the bytes you have already consumed, so forward it along
+	// with the string.
+	TerminalStringEndESC TerminalStringEnd = C.GHOSTTY_TERMINAL_STRING_END_ST_ESC
+
+	// TerminalStringEndST means the string ended with the single-byte
+	// string terminator 0x9C. The stream is back at ground.
+	//
+	// Inside an OSC string, and inside a DCS string after its header, 0x9C
+	// is treated as content. So this only ends an APC string or a DCS
+	// string that is still in its header.
+	TerminalStringEndST TerminalStringEnd = C.GHOSTTY_TERMINAL_STRING_END_ST_C1
+
+	// TerminalStringEndCanceled means the string was canceled by CAN (0x18)
+	// or SUB (0x1A). The stream is back at ground.
+	TerminalStringEndCanceled TerminalStringEnd = C.GHOSTTY_TERMINAL_STRING_END_CANCELLED
+
+	// TerminalStringEndAborted means another 8-bit control byte interrupted
+	// the string. If that byte starts a new control string, the same stop
+	// also reports the start of the new string. See
+	// [TerminalWriteStop.Reached].
+	//
+	// Like [TerminalStringEndST], this only ends an APC string or a DCS
+	// string that is still in its header.
+	TerminalStringEndAborted TerminalStringEnd = C.GHOSTTY_TERMINAL_STRING_END_ABORTED
+
+	// TerminalStringEndBEL means the string ended with BEL (0x07). Only OSC
+	// strings end this way.
+	TerminalStringEndBEL TerminalStringEnd = C.GHOSTTY_TERMINAL_STRING_END_BEL
+)
+
+// TerminalWriteStop describes where [Terminal.VTWriteUntil] stopped and why.
+//
+// Fields that don't apply to a stop are zero. Zero is also a valid value for
+// Kind, Introducer, and End, so check Reached to see which fields apply.
+// C: GhosttyTerminalWriteStop
+type TerminalWriteStop struct {
+	// Consumed is the number of input bytes that were processed, including
+	// the byte that reached the boundary.
+	Consumed int
+
+	// Reached holds the requested boundaries that were reached. It is zero
+	// if all of the input was consumed without reaching one.
+	//
+	// Usually one boundary is set. Two are set when a single byte does two
+	// things at once:
+	//
+	//   - It ends a string and returns the stream to ground. For example,
+	//     BEL ends an OSC string. If you asked for both
+	//     [TerminalBoundaryOSCEnd] and [TerminalBoundaryGround], both are
+	//     set.
+	//   - It ends one string and starts another. For example, the byte 0x9D
+	//     inside an APC string ends the APC string and starts an OSC
+	//     string. End is [TerminalStringEndAborted] and Introducer is
+	//     [TerminalStringIntroducerC1].
+	Reached TerminalBoundary
+
+	// Kind is the kind of string that started or ended. It is set when
+	// Reached includes a start or end boundary. If one byte ended a string
+	// and started another, Kind is the kind of the string that ended.
+	Kind TerminalStringKind
+
+	// Introducer is how the string started. It is set when Reached
+	// includes a start boundary.
+	Introducer TerminalStringIntroducer
+
+	// End is how the string ended. It is set when Reached includes an end
+	// boundary.
+	End TerminalStringEnd
+
+	// Byte is the byte that started or ended the string, such as ']', 0x9D,
+	// ESC, or BEL. It is set when Reached includes a start or end boundary.
+	Byte byte
 }
 
 // TerminalScreen identifies which screen buffer is active.

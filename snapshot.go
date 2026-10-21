@@ -115,6 +115,58 @@ ghostty_go_snapshot_decoder_decode(GhosttySnapshotDecoder decoder) {
 	out.result = ghostty_snapshot_decoder_decode(decoder, &out.terminal);
 	return out;
 }
+
+// ghostty_go_snapshot_decoder_progress reads every progress value that
+// applies to the most recently decoded record in one cgo call. Which values
+// exist depends on the progress kind, so a get_multi call with a fixed list
+// of keys would fail for one kind or the other.
+typedef struct {
+	GhosttyResult result;
+	GhosttySnapshotDecoderProgressKind kind;
+	GhosttyTerminalScreen screen;
+	size_t rows;
+	uint32_t remaining;
+	uint32_t image_id;
+	uint32_t image_frame;
+	size_t image_bytes;
+} ghostty_go_snapshot_decoder_progress_result;
+
+static inline ghostty_go_snapshot_decoder_progress_result
+ghostty_go_snapshot_decoder_progress(GhosttySnapshotDecoder decoder) {
+	ghostty_go_snapshot_decoder_progress_result out = {0};
+	out.result = ghostty_snapshot_decoder_get(
+		decoder, GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_KIND, &out.kind);
+	if (out.result != GHOSTTY_SUCCESS) return out;
+	out.result = ghostty_snapshot_decoder_get(
+		decoder, GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_SCREEN, &out.screen);
+	if (out.result != GHOSTTY_SUCCESS) return out;
+
+	switch (out.kind) {
+	case GHOSTTY_SNAPSHOT_DECODER_PROGRESS_KIND_PAGE:
+		out.result = ghostty_snapshot_decoder_get(
+			decoder, GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_ROWS, &out.rows);
+		if (out.result != GHOSTTY_SUCCESS) return out;
+		out.result = ghostty_snapshot_decoder_get(
+			decoder, GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_REMAINING, &out.remaining);
+		return out;
+
+	case GHOSTTY_SNAPSHOT_DECODER_PROGRESS_KIND_IMAGE:
+		out.result = ghostty_snapshot_decoder_get(
+			decoder, GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_IMAGE_ID, &out.image_id);
+		if (out.result != GHOSTTY_SUCCESS) return out;
+		out.result = ghostty_snapshot_decoder_get(
+			decoder, GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_IMAGE_FRAME, &out.image_frame);
+		if (out.result != GHOSTTY_SUCCESS) return out;
+		out.result = ghostty_snapshot_decoder_get(
+			decoder, GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_IMAGE_BYTES, &out.image_bytes);
+		return out;
+
+	default:
+		// A newer library may add more progress kinds. Report the kind
+		// and screen, and leave the kind-specific values zero.
+		return out;
+	}
+}
 */
 import "C"
 
@@ -145,6 +197,28 @@ const (
 	// compresses scrollback as it restores it (bool). See
 	// [SnapshotDecoder.SetCompressHistory].
 	SnapshotDecoderOptionCompressHistory SnapshotDecoderOption = C.GHOSTTY_SNAPSHOT_DECODER_OPT_COMPRESS_HISTORY
+
+	// SnapshotDecoderOptionKittyImageStorageLimit is the maximum number of
+	// bytes of Kitty graphics images kept for each restored screen
+	// (uint64_t). See [SnapshotDecoder.SetKittyImageStorageLimit].
+	SnapshotDecoderOptionKittyImageStorageLimit SnapshotDecoderOption = C.GHOSTTY_SNAPSHOT_DECODER_OPT_KITTY_IMAGE_STORAGE_LIMIT
+)
+
+// SnapshotDecoderProgressKind is the kind of record that the most recent
+// successful call to [SnapshotDecoder.Next] decoded.
+// C: GhosttySnapshotDecoderProgressKind
+type SnapshotDecoderProgressKind int
+
+const (
+	// SnapshotDecoderProgressKindPage is a page of scrollback history,
+	// along with the Kitty graphics placements on that page. The Rows and
+	// Remaining fields of [SnapshotDecoderProgress] describe it.
+	SnapshotDecoderProgressKindPage SnapshotDecoderProgressKind = C.GHOSTTY_SNAPSHOT_DECODER_PROGRESS_KIND_PAGE
+
+	// SnapshotDecoderProgressKindImage is the pixel data of one Kitty
+	// graphics image or animation frame. The ImageID, ImageFrame, and
+	// ImageBytes fields of [SnapshotDecoderProgress] describe it.
+	SnapshotDecoderProgressKindImage SnapshotDecoderProgressKind = C.GHOSTTY_SNAPSHOT_DECODER_PROGRESS_KIND_IMAGE
 )
 
 // SnapshotDecoderData identifies a data field available from a
@@ -172,16 +246,18 @@ const (
 	// alternate screen history extent (uint64_t).
 	SnapshotDecoderDataHistoryRowsAlternate SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_HISTORY_ROWS_ALTERNATE
 
-	// SnapshotDecoderDataProgressScreen is the screen associated with the most
-	// recently decoded history page (GhosttyTerminalScreen).
+	// SnapshotDecoderDataProgressScreen is the screen that the most recently
+	// decoded history page or image belongs to (GhosttyTerminalScreen).
 	SnapshotDecoderDataProgressScreen SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_SCREEN
 
 	// SnapshotDecoderDataProgressRows is the number of rows prepended by the
-	// most recently decoded history page (size_t).
+	// most recently decoded history page (size_t). It is only available
+	// for [SnapshotDecoderProgressKindPage].
 	SnapshotDecoderDataProgressRows SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_ROWS
 
 	// SnapshotDecoderDataProgressRemaining is the number of page records
-	// remaining in the current screen's history sequence (uint32_t).
+	// remaining in the current screen's history sequence (uint32_t). It is
+	// only available for [SnapshotDecoderProgressKindPage].
 	SnapshotDecoderDataProgressRemaining SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_REMAINING
 
 	// SnapshotDecoderDataRetainContinuation reports whether continuation
@@ -192,6 +268,57 @@ const (
 	// compresses scrollback as it restores it (bool). See
 	// [SnapshotDecoder.SetCompressHistory].
 	SnapshotDecoderDataCompressHistory SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_COMPRESS_HISTORY
+
+	// SnapshotDecoderDataKittyImageStorageLimit is the maximum number of
+	// bytes of Kitty graphics images kept for each restored screen
+	// (uint64_t). See [SnapshotDecoder.SetKittyImageStorageLimit].
+	SnapshotDecoderDataKittyImageStorageLimit SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_KITTY_IMAGE_STORAGE_LIMIT
+
+	// SnapshotDecoderDataProgressKind is the kind of record that the most
+	// recent successful call to Next decoded
+	// (GhosttySnapshotDecoderProgressKind). It is available whenever
+	// [SnapshotDecoderDataProgressScreen] is.
+	SnapshotDecoderDataProgressKind SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_KIND
+
+	// SnapshotDecoderDataProgressImageID is the ID of the Kitty graphics
+	// image whose pixel data the most recent call to Next decoded
+	// (uint32_t). It is only available for
+	// [SnapshotDecoderProgressKindImage].
+	SnapshotDecoderDataProgressImageID SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_IMAGE_ID
+
+	// SnapshotDecoderDataProgressImageFrame is the frame number of that
+	// pixel data (uint32_t). Frame 1 is the image itself, and frames 2 and
+	// up are animation frames. It is only available for
+	// [SnapshotDecoderProgressKindImage].
+	SnapshotDecoderDataProgressImageFrame SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_IMAGE_FRAME
+
+	// SnapshotDecoderDataProgressImageBytes is the number of bytes of pixel
+	// data that the most recent call to Next added to its image (size_t).
+	// Zero means the data was read but discarded. It is only available for
+	// [SnapshotDecoderProgressKindImage].
+	SnapshotDecoderDataProgressImageBytes SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_IMAGE_BYTES
+
+	// SnapshotDecoderDataKittyImagesPrimary is the number of Kitty graphics
+	// images restored on the primary screen (uint32_t). See
+	// [SnapshotDecoder.KittyImageCount].
+	SnapshotDecoderDataKittyImagesPrimary SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_KITTY_IMAGES_PRIMARY
+
+	// SnapshotDecoderDataKittyImagesAlternate is the number of Kitty
+	// graphics images restored on the alternate screen (uint32_t). See
+	// [SnapshotDecoder.KittyImageCount].
+	SnapshotDecoderDataKittyImagesAlternate SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_KITTY_IMAGES_ALTERNATE
+
+	// SnapshotDecoderDataKittyPendingBytesPrimary is the number of bytes of
+	// Kitty graphics pixel data still to come for the primary screen when
+	// Ready returned (uint64_t). See
+	// [SnapshotDecoder.KittyImagePendingBytes].
+	SnapshotDecoderDataKittyPendingBytesPrimary SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_KITTY_PENDING_BYTES_PRIMARY
+
+	// SnapshotDecoderDataKittyPendingBytesAlternate is the number of bytes
+	// of Kitty graphics pixel data still to come for the alternate screen
+	// when Ready returned (uint64_t). See
+	// [SnapshotDecoder.KittyImagePendingBytes].
+	SnapshotDecoderDataKittyPendingBytesAlternate SnapshotDecoderData = C.GHOSTTY_SNAPSHOT_DECODER_DATA_KITTY_PENDING_BYTES_ALTERNATE
 )
 
 // SnapshotDecoder incrementally decodes and validates one terminal
@@ -464,9 +591,36 @@ func (d *SnapshotDecoder) SetCompressHistory(compress bool) error {
 	))
 }
 
+// SetKittyImageStorageLimit sets the maximum number of bytes of Kitty
+// graphics images to keep for each restored screen. It must be called before
+// decoding begins. The default is the limit that a new terminal uses, and
+// zero turns off Kitty graphics on the restored terminal.
+//
+// Snapshots do not record the limit of the terminal that created them, so
+// the decoder always uses this one. Images are restored oldest first. If an
+// image does not fit, older images are removed to make room, just as they
+// would be on a live terminal. To change the limit after decoding, call
+// [Terminal.SetKittyImageStorageLimit] on the restored terminal.
+// C: ghostty_snapshot_decoder_set
+func (d *SnapshotDecoder) SetKittyImageStorageLimit(limit uint64) error {
+	v := C.uint64_t(limit)
+	return resultError(C.ghostty_snapshot_decoder_set(
+		d.ptr,
+		C.GHOSTTY_SNAPSHOT_DECODER_OPT_KITTY_IMAGE_STORAGE_LIMIT,
+		unsafe.Pointer(&v),
+	))
+}
+
 // Ready decodes and validates the renderable snapshot prefix. The
-// returned terminal is caller-owned and immediately usable; older history can
-// then be restored one page at a time with [SnapshotDecoder.Next].
+// returned terminal belongs to the caller and is ready to use right away.
+// Older history and Kitty graphics pixel data can then be restored one
+// record at a time with [SnapshotDecoder.Next].
+//
+// Ready restores Kitty graphics images without their pixel data. You can
+// place and inspect these images right away, but [KittyGraphicsImage.Data]
+// has nothing to return until Next delivers the pixels. When the pixels
+// arrive, [KittyGraphics.Generation] changes, so a renderer that watches it
+// draws the image on its next frame.
 // C: ghostty_snapshot_decoder_ready
 func (d *SnapshotDecoder) Ready() (*Terminal, error) {
 	result := C.ghostty_go_snapshot_decoder_ready(d.ptr)
@@ -476,9 +630,18 @@ func (d *SnapshotDecoder) Ready() (*Terminal, error) {
 	return terminalFromC(result.terminal, TerminalConfig{}), nil
 }
 
-// Next decodes and validates one history page. It returns true after a
-// page is consumed. It returns false with no error after FINISH is validated,
-// including on repeated calls after FINISH.
+// Next decodes and validates one record. A record is either a page of
+// history, or the pixel data of one Kitty graphics image or animation frame.
+// Pixel data can arrive at any point, including between history pages.
+//
+// Next returns true after it decodes a record. Call [SnapshotDecoder.Progress]
+// to see what kind of record it was. Next returns false with a nil error once
+// the whole snapshot has been decoded, and keeps returning false after that.
+//
+// You can render, resize, and write live input to the terminal between
+// calls. If that makes a record impossible to apply, Next still reads and
+// validates it, and Progress reports zero rows or zero bytes. For example,
+// this happens when live input deletes the image that pixel data belongs to.
 //
 // If [SnapshotDecoder.SetCompressHistory] is on, Next compresses the page
 // before returning, unless the page is on screen.
@@ -607,7 +770,7 @@ func (d *SnapshotDecoder) SourceOffset() (uint, error) {
 
 // HistoryRows returns the snapshot's complete logical history extent for
 // screen. It becomes available after Ready validates. The alternate screen
-// returns [ResultNoValue] when the snapshot does not declare one.
+// returns [ErrNoValue] if the snapshot has no alternate screen.
 func (d *SnapshotDecoder) HistoryRows(screen TerminalScreen) (uint64, error) {
 	var data SnapshotDecoderData
 	switch screen {
@@ -626,8 +789,124 @@ func (d *SnapshotDecoder) HistoryRows(screen TerminalScreen) (uint64, error) {
 	return uint64(value), nil
 }
 
+// KittyImageStorageLimit returns the maximum number of bytes of Kitty
+// graphics images the decoder keeps for each restored screen. See
+// [SnapshotDecoder.SetKittyImageStorageLimit].
+func (d *SnapshotDecoder) KittyImageStorageLimit() (uint64, error) {
+	var value C.uint64_t
+	if err := d.Get(
+		SnapshotDecoderDataKittyImageStorageLimit,
+		unsafe.Pointer(&value),
+	); err != nil {
+		return 0, err
+	}
+	return uint64(value), nil
+}
+
+// KittyImageCount returns the number of Kitty graphics images that Ready
+// restored on screen. Their pixel data arrives later through
+// [SnapshotDecoder.Next].
+//
+// It is available after Ready returns. It is zero if the library was built
+// without Kitty graphics support. For [ScreenAlternate], it returns
+// [ErrNoValue] if the snapshot has no alternate screen.
+func (d *SnapshotDecoder) KittyImageCount(screen TerminalScreen) (uint32, error) {
+	var data SnapshotDecoderData
+	switch screen {
+	case ScreenPrimary:
+		data = SnapshotDecoderDataKittyImagesPrimary
+	case ScreenAlternate:
+		data = SnapshotDecoderDataKittyImagesAlternate
+	default:
+		return 0, &Error{Result: ResultInvalidValue}
+	}
+
+	var value C.uint32_t
+	if err := d.Get(data, unsafe.Pointer(&value)); err != nil {
+		return 0, err
+	}
+	return uint32(value), nil
+}
+
+// KittyImagePendingBytes returns the number of bytes of Kitty graphics pixel
+// data that were still to come for screen when Ready returned.
+//
+// Use it to show progress while the pixel data arrives. After each call to
+// Next, add [SnapshotDecoderProgress.ImageBytes] to a running total for the
+// screen. Discarded pixel data counts as zero bytes, so the total can end up
+// below this value.
+//
+// It is available after Ready returns. For [ScreenAlternate], it returns
+// [ErrNoValue] if the snapshot has no alternate screen.
+func (d *SnapshotDecoder) KittyImagePendingBytes(screen TerminalScreen) (uint64, error) {
+	var data SnapshotDecoderData
+	switch screen {
+	case ScreenPrimary:
+		data = SnapshotDecoderDataKittyPendingBytesPrimary
+	case ScreenAlternate:
+		data = SnapshotDecoderDataKittyPendingBytesAlternate
+	default:
+		return 0, &Error{Result: ResultInvalidValue}
+	}
+
+	var value C.uint64_t
+	if err := d.Get(data, unsafe.Pointer(&value)); err != nil {
+		return 0, err
+	}
+	return uint64(value), nil
+}
+
+// ProgressKind returns the kind of record that the most recent successful
+// call to Next decoded.
+func (d *SnapshotDecoder) ProgressKind() (SnapshotDecoderProgressKind, error) {
+	var value C.GhosttySnapshotDecoderProgressKind
+	if err := d.Get(SnapshotDecoderDataProgressKind, unsafe.Pointer(&value)); err != nil {
+		return 0, err
+	}
+	return SnapshotDecoderProgressKind(value), nil
+}
+
+// ProgressImageID returns the ID of the Kitty graphics image whose pixel
+// data the most recent call to Next decoded. It returns [ErrNoValue] if that
+// record was not [SnapshotDecoderProgressKindImage].
+func (d *SnapshotDecoder) ProgressImageID() (uint32, error) {
+	var value C.uint32_t
+	if err := d.Get(SnapshotDecoderDataProgressImageID, unsafe.Pointer(&value)); err != nil {
+		return 0, err
+	}
+	return uint32(value), nil
+}
+
+// ProgressImageFrame returns the frame number of the pixel data that the
+// most recent call to Next decoded. Frame 1 is the image itself, and frames
+// 2 and up are animation frames. It returns [ErrNoValue] if that record was
+// not [SnapshotDecoderProgressKindImage].
+func (d *SnapshotDecoder) ProgressImageFrame() (uint32, error) {
+	var value C.uint32_t
+	if err := d.Get(SnapshotDecoderDataProgressImageFrame, unsafe.Pointer(&value)); err != nil {
+		return 0, err
+	}
+	return uint32(value), nil
+}
+
+// ProgressImageBytes returns the number of bytes of pixel data that the most
+// recent call to Next added to its image. It returns [ErrNoValue] if that
+// record was not [SnapshotDecoderProgressKindImage].
+//
+// Zero means the pixel data was read and validated but then discarded. That
+// happens when live input deleted the image or replaced it with a new image
+// that has the same ID, when the image did not fit the storage limit, or
+// when its screen no longer exists.
+func (d *SnapshotDecoder) ProgressImageBytes() (uint, error) {
+	var value C.size_t
+	if err := d.Get(SnapshotDecoderDataProgressImageBytes, unsafe.Pointer(&value)); err != nil {
+		return 0, err
+	}
+	return uint(value), nil
+}
+
 // ProgressScreen returns the screen associated with the most recently
-// decoded history page.
+// decoded history page or image belongs to.
 func (d *SnapshotDecoder) ProgressScreen() (TerminalScreen, error) {
 	var value C.GhosttyTerminalScreen
 	if err := d.Get(SnapshotDecoderDataProgressScreen, unsafe.Pointer(&value)); err != nil {
@@ -638,6 +917,8 @@ func (d *SnapshotDecoder) ProgressScreen() (TerminalScreen, error) {
 
 // ProgressRows returns the number of rows prepended by the most recently
 // decoded history page. Zero means the page could not be applied safely.
+// It returns [ErrNoValue] if that record was not
+// [SnapshotDecoderProgressKindPage].
 func (d *SnapshotDecoder) ProgressRows() (uint, error) {
 	var value C.size_t
 	if err := d.Get(SnapshotDecoderDataProgressRows, unsafe.Pointer(&value)); err != nil {
@@ -647,7 +928,8 @@ func (d *SnapshotDecoder) ProgressRows() (uint, error) {
 }
 
 // ProgressRemaining returns the number of page records remaining in the same
-// screen's history sequence.
+// screen's history sequence. It returns [ErrNoValue] if that record was not
+// [SnapshotDecoderProgressKindPage].
 func (d *SnapshotDecoder) ProgressRemaining() (uint32, error) {
 	var value C.uint32_t
 	if err := d.Get(SnapshotDecoderDataProgressRemaining, unsafe.Pointer(&value)); err != nil {
@@ -656,46 +938,57 @@ func (d *SnapshotDecoder) ProgressRemaining() (uint32, error) {
 	return uint32(value), nil
 }
 
-// SnapshotDecoderProgress describes the most recently decoded history page.
+// SnapshotDecoderProgress describes the record that the most recent
+// successful call to [SnapshotDecoder.Next] decoded. Kind says which fields
+// apply. Fields that don't apply are zero.
 type SnapshotDecoderProgress struct {
-	// Screen is the screen whose history page was consumed.
+	// Kind is the kind of record: a history page or image pixel data.
+	Kind SnapshotDecoderProgressKind
+
+	// Screen is the screen that the record belongs to.
 	Screen TerminalScreen
 
-	// Rows is the number of rows prepended to the live terminal.
+	// Rows is the number of rows added to the top of the scrollback. Zero
+	// means the page could not be applied. It is set for
+	// [SnapshotDecoderProgressKindPage].
 	Rows uint
 
-	// Remaining is the number of page records left in this screen's history.
+	// Remaining is the number of history pages still to come for this
+	// screen. It is set for [SnapshotDecoderProgressKindPage].
 	Remaining uint32
+
+	// ImageID is the ID of the Kitty graphics image that the pixel data
+	// belongs to. It is set for [SnapshotDecoderProgressKindImage].
+	ImageID uint32
+
+	// ImageFrame is the frame number of the pixel data. Frame 1 is the
+	// image itself, and frames 2 and up are animation frames. It is set for
+	// [SnapshotDecoderProgressKindImage].
+	ImageFrame uint32
+
+	// ImageBytes is the number of bytes of pixel data added to the image.
+	// Zero means the data was discarded. See
+	// [SnapshotDecoder.ProgressImageBytes] for when that happens. It is set
+	// for [SnapshotDecoderProgressKindImage].
+	ImageBytes uint
 }
 
-// Progress returns all progress fields for the most recently decoded history
-// page in one C call.
+// Progress returns every progress value for the record that the most recent
+// successful call to Next decoded. It reads them all in a single call and
+// does not allocate, so prefer it to the individual Progress methods.
 func (d *SnapshotDecoder) Progress() (SnapshotDecoderProgress, error) {
-	var screen C.GhosttyTerminalScreen
-	var rows C.size_t
-	var remaining C.uint32_t
-	written, err := d.GetMulti(
-		[]SnapshotDecoderData{
-			SnapshotDecoderDataProgressScreen,
-			SnapshotDecoderDataProgressRows,
-			SnapshotDecoderDataProgressRemaining,
-		},
-		[]unsafe.Pointer{
-			unsafe.Pointer(&screen),
-			unsafe.Pointer(&rows),
-			unsafe.Pointer(&remaining),
-		},
-	)
-	if err != nil {
+	out := C.ghostty_go_snapshot_decoder_progress(d.ptr)
+	if err := resultError(out.result); err != nil {
 		return SnapshotDecoderProgress{}, err
 	}
-	if written != 3 {
-		return SnapshotDecoderProgress{}, &Error{Result: ResultInvalidValue}
-	}
 	return SnapshotDecoderProgress{
-		Screen:    TerminalScreen(screen),
-		Rows:      uint(rows),
-		Remaining: uint32(remaining),
+		Kind:       SnapshotDecoderProgressKind(out.kind),
+		Screen:     TerminalScreen(out.screen),
+		Rows:       uint(out.rows),
+		Remaining:  uint32(out.remaining),
+		ImageID:    uint32(out.image_id),
+		ImageFrame: uint32(out.image_frame),
+		ImageBytes: uint(out.image_bytes),
 	}, nil
 }
 

@@ -90,6 +90,37 @@ func TestTerminalVTWrite(t *testing.T) {
 	term.VTWrite(nil)               // empty write
 }
 
+// vtWriteUntilExpect is the expected outcome of one VTWriteUntil call.
+type vtWriteUntilExpect struct {
+	reached bool
+	stop    TerminalWriteStop
+}
+
+// assertVTWriteUntil runs one VTWriteUntil call and compares every field
+// of the result, so a misread field in the C-to-Go conversion fails.
+func assertVTWriteUntil(
+	t *testing.T,
+	term *Terminal,
+	data []byte,
+	want TerminalBoundary,
+	expect vtWriteUntilExpect,
+) {
+	t.Helper()
+
+	stop, err := term.VTWriteUntil(data, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stop != expect.stop {
+		t.Fatalf("VTWriteUntil(%q, %#x) = %+v, want %+v", data, want, stop, expect.stop)
+	}
+
+	// A stop reports a reached boundary exactly when one was expected.
+	if (stop.Reached != 0) != expect.reached {
+		t.Fatalf("VTWriteUntil(%q, %#x) reached = %v, want %v", data, want, stop.Reached != 0, expect.reached)
+	}
+}
+
 func TestTerminalVTWriteUntilGround(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {
@@ -98,25 +129,19 @@ func TestTerminalVTWriteUntilGround(t *testing.T) {
 	defer term.Close()
 
 	// A terminal already at ground leaves the input untouched.
-	consumed, err := term.VTWriteUntilGround([]byte("untouched"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if consumed != 0 {
-		t.Fatalf("expected no bytes consumed at ground, got %d", consumed)
-	}
+	assertVTWriteUntil(t, term, []byte("untouched"), TerminalBoundaryGround, vtWriteUntilExpect{
+		reached: true,
+		stop:    TerminalWriteStop{Reached: TerminalBoundaryGround},
+	})
 
 	// Complete a split CSI sequence, but stop before processing the printable
 	// suffix because the parser reaches ground after the final byte.
 	term.VTWrite([]byte("\x1b[31"))
 	input := []byte("mABC")
-	consumed, err = term.VTWriteUntilGround(input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if consumed != 1 {
-		t.Fatalf("expected one byte consumed through ground, got %d", consumed)
-	}
+	assertVTWriteUntil(t, term, input, TerminalBoundaryGround, vtWriteUntilExpect{
+		reached: true,
+		stop:    TerminalWriteStop{Consumed: 1, Reached: TerminalBoundaryGround},
+	})
 	x, err := term.CursorX()
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +150,7 @@ func TestTerminalVTWriteUntilGround(t *testing.T) {
 		t.Fatalf("expected suffix to remain unprocessed, cursor is at %d", x)
 	}
 
-	term.VTWrite(input[consumed:])
+	term.VTWrite(input[1:])
 	x, err = term.CursorX()
 	if err != nil {
 		t.Fatal(err)
@@ -137,27 +162,216 @@ func TestTerminalVTWriteUntilGround(t *testing.T) {
 	// An empty slice while unfinished consumes nothing but cannot find a
 	// ground boundary.
 	term.VTWrite([]byte("\x1b["))
-	consumed, err = term.VTWriteUntilGround(nil)
-	if consumed != 0 {
-		t.Fatalf("expected empty input to consume zero bytes, got %d", consumed)
-	}
-	assertResultError(t, err, ResultNoValue)
+	assertVTWriteUntil(t, term, nil, TerminalBoundaryGround, vtWriteUntilExpect{})
+
+	// All input consumed without reaching ground.
+	input = []byte("123")
+	assertVTWriteUntil(t, term, input, TerminalBoundaryGround, vtWriteUntilExpect{
+		stop: TerminalWriteStop{Consumed: len(input)},
+	})
 }
 
-func TestTerminalVTWriteUntilGroundNoValue(t *testing.T) {
+func TestTerminalVTWriteUntilAPC(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer term.Close()
 
-	term.VTWrite([]byte("\x1b["))
-	input := []byte("123")
-	consumed, err := term.VTWriteUntilGround(input)
-	if consumed != len(input) {
-		t.Fatalf("expected all %d bytes consumed, got %d", len(input), consumed)
+	want := TerminalBoundaryAPCStart | TerminalBoundaryAPCEnd
+	data := []byte("ab\x1b_Gq=1\x1b\\cd")
+
+	// The start stop lands on '_' so the content begins with 'G'.
+	assertVTWriteUntil(t, term, data, want, vtWriteUntilExpect{
+		reached: true,
+		stop: TerminalWriteStop{
+			Consumed:   4,
+			Reached:    TerminalBoundaryAPCStart,
+			Kind:       TerminalStringKindAPC,
+			Introducer: TerminalStringIntroducerESC,
+			Byte:       '_',
+		},
+	})
+	data = data[4:]
+	if data[0] != 'G' {
+		t.Fatalf("expected APC content to start at G, got %q", data[0])
 	}
-	assertResultError(t, err, ResultNoValue)
+
+	// The end stop consumes the ESC of ESC \ but not the backslash.
+	assertVTWriteUntil(t, term, data, want, vtWriteUntilExpect{
+		reached: true,
+		stop: TerminalWriteStop{
+			Consumed: 5,
+			Reached:  TerminalBoundaryAPCEnd,
+			Kind:     TerminalStringKindAPC,
+			End:      TerminalStringEndESC,
+			Byte:     0x1b,
+		},
+	})
+	data = data[5:]
+	if data[0] != '\\' {
+		t.Fatalf("expected backslash to remain unconsumed, got %q", data[0])
+	}
+
+	// The rest has no boundary and is fully consumed.
+	assertVTWriteUntil(t, term, data, want, vtWriteUntilExpect{
+		stop: TerminalWriteStop{Consumed: len(data)},
+	})
+	x, err := term.CursorX()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x != 4 {
+		t.Fatalf("expected cursor at 4 after printable bytes, got %d", x)
+	}
+}
+
+func TestTerminalVTWriteUntilOSCAndGround(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// Start an OSC without asking for ground, then ask for both. BEL ends
+	// the OSC and returns to ground in one byte, so both flags are set.
+	want := TerminalBoundaryOSCStart | TerminalBoundaryOSCEnd
+	data := []byte("\x1b]2;title\x07")
+	assertVTWriteUntil(t, term, data, want, vtWriteUntilExpect{
+		reached: true,
+		stop: TerminalWriteStop{
+			Consumed:   2,
+			Reached:    TerminalBoundaryOSCStart,
+			Kind:       TerminalStringKindOSC,
+			Introducer: TerminalStringIntroducerESC,
+			Byte:       ']',
+		},
+	})
+	data = data[2:]
+	assertVTWriteUntil(t, term, data, want|TerminalBoundaryGround, vtWriteUntilExpect{
+		reached: true,
+		stop: TerminalWriteStop{
+			Consumed: len(data),
+			Reached:  TerminalBoundaryOSCEnd | TerminalBoundaryGround,
+			Kind:     TerminalStringKindOSC,
+			End:      TerminalStringEndBEL,
+			Byte:     0x07,
+		},
+	})
+
+	title, err := term.Title()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title != "title" {
+		t.Fatalf("expected OSC to be processed, title is %q", title)
+	}
+}
+
+func TestTerminalVTWriteUntilDCS(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	want := TerminalBoundaryDCSStart | TerminalBoundaryDCSEnd
+	data := []byte("\x1bP1;2|data\x18")
+	assertVTWriteUntil(t, term, data, want, vtWriteUntilExpect{
+		reached: true,
+		stop: TerminalWriteStop{
+			Consumed:   2,
+			Reached:    TerminalBoundaryDCSStart,
+			Kind:       TerminalStringKindDCS,
+			Introducer: TerminalStringIntroducerESC,
+			Byte:       'P',
+		},
+	})
+	data = data[2:]
+	assertVTWriteUntil(t, term, data, want, vtWriteUntilExpect{
+		reached: true,
+		stop: TerminalWriteStop{
+			Consumed: len(data),
+			Reached:  TerminalBoundaryDCSEnd,
+			Kind:     TerminalStringKindDCS,
+			End:      TerminalStringEndCanceled,
+			Byte:     0x18,
+		},
+	})
+}
+
+func TestTerminalVTWriteUntilAbortedStartsNewString(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	// 0x9D inside an APC ends it and starts an OSC on the same byte.
+	want := TerminalBoundaryAPCEnd | TerminalBoundaryOSCStart
+	data := []byte("\x1b_a\x9d2;t\x07")
+	assertVTWriteUntil(t, term, data, want, vtWriteUntilExpect{
+		reached: true,
+		stop: TerminalWriteStop{
+			Consumed:   4,
+			Reached:    TerminalBoundaryAPCEnd | TerminalBoundaryOSCStart,
+			Kind:       TerminalStringKindAPC,
+			Introducer: TerminalStringIntroducerC1,
+			End:        TerminalStringEndAborted,
+			Byte:       0x9d,
+		},
+	})
+}
+
+func TestTerminalVTWriteUntilInvalid(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	for _, want := range []TerminalBoundary{0, 1 << 31} {
+		stop, err := term.VTWriteUntil([]byte("abc"), want)
+		assertResultError(t, err, ResultInvalidValue)
+		if stop != (TerminalWriteStop{}) {
+			t.Fatalf("expected zero stop on error, got %+v", stop)
+		}
+	}
+
+	// Nothing was consumed by the failed calls.
+	x, err := term.CursorX()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x != 0 {
+		t.Fatalf("expected invalid calls to consume nothing, cursor at %d", x)
+	}
+}
+
+// TestTerminalVTWriteUntilNoAllocs guards the hot path: neither a stop
+// nor a full consume may allocate.
+func TestTerminalVTWriteUntilNoAllocs(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	data := []byte("text \x1b]2;t\x07 more text")
+	want := TerminalBoundaryOSCStart | TerminalBoundaryOSCEnd
+	allocs := testing.AllocsPerRun(100, func() {
+		rest := data
+		for len(rest) > 0 {
+			stop, err := term.VTWriteUntil(rest, want)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rest = rest[stop.Consumed:]
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("expected zero allocations, got %v", allocs)
+	}
 }
 
 func TestTerminalIOWriter(t *testing.T) {

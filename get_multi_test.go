@@ -17,7 +17,6 @@ import (
 //   - KittyGraphicsPlacementIterator.Info: TestKittyGraphicsPlacementInfo
 //   - SelectionGesture.GetMulti: TestSelectionGestureAPIs
 //   - Search.GetMulti: TestSearchLifecycleAndResults
-//   - SnapshotDecoder.GetMulti, through Progress: TestSnapshotIncrementalDecode
 
 // getMultiGlobal gives TestGetMultiArgsValueKinds a pointer to a Go
 // global.
@@ -205,6 +204,53 @@ func TestTerminalGetMulti(t *testing.T) {
 }
 
 // TestCellAndRowGetMulti checks Cell.GetMulti and Row.GetMulti.
+func TestSnapshotDecoderGetMulti(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	snapshot, err := term.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder, err := NewSnapshotDecoderBytes(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoder.Close()
+
+	if err := decoder.SetMaxContinuationBytes(64); err != nil {
+		t.Fatal(err)
+	}
+	if err := decoder.SetKittyImageStorageLimit(12345); err != nil {
+		t.Fatal(err)
+	}
+
+	var maxContinuation uintptr
+	var storageLimit uint64
+	written, err := decoder.GetMulti(
+		[]SnapshotDecoderData{
+			SnapshotDecoderDataMaxContinuationBytes,
+			SnapshotDecoderDataKittyImageStorageLimit,
+		},
+		[]unsafe.Pointer{
+			unsafe.Pointer(&maxContinuation),
+			unsafe.Pointer(&storageLimit),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written != 2 || maxContinuation != 64 || storageLimit != 12345 {
+		t.Fatalf(
+			"expected 2 values (64, 12345), got %d values (%d, %d)",
+			written, maxContinuation, storageLimit,
+		)
+	}
+}
+
 func TestCellAndRowGetMulti(t *testing.T) {
 	term, err := NewTerminal(WithSize(10, 3))
 	if err != nil {

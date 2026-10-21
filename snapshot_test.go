@@ -352,8 +352,21 @@ func TestSnapshotIncrementalDecode(t *testing.T) {
 		if progress.Screen != ScreenPrimary && progress.Screen != ScreenAlternate {
 			t.Fatalf("invalid progress screen %d", progress.Screen)
 		}
+		if progress.Kind != SnapshotDecoderProgressKindPage {
+			t.Fatalf("expected only page progress without images, got %+v", progress)
+		}
 		restoredRows += progress.Rows
 		if pages == 0 {
+			kind, err := decoder.ProgressKind()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if kind != progress.Kind {
+				t.Fatalf("individual kind %d differs from combined %+v", kind, progress)
+			}
+			_, err = decoder.ProgressImageID()
+			assertResultError(t, err, ResultNoValue)
+
 			screen, err := decoder.ProgressScreen()
 			if err != nil {
 				t.Fatal(err)
@@ -395,6 +408,143 @@ func TestSnapshotIncrementalDecode(t *testing.T) {
 	}
 	if offset != uint(len(snapshot)) {
 		t.Fatalf("expected FINISH offset %d, got %d", len(snapshot), offset)
+	}
+}
+
+// TestSnapshotKittyImages checks that Kitty graphics images are restored
+// at READY with their pixels pending, and that Next then delivers the
+// pixels with image progress.
+func TestSnapshotKittyImages(t *testing.T) {
+	term := newKittyTerminal(t)
+	defer term.Close()
+	sendKittyImage(t, term)
+
+	snapshot, err := term.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decoder, err := NewSnapshotDecoderBytes(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoder.Close()
+
+	limit := uint64(32 * 1024 * 1024)
+	if err := decoder.SetKittyImageStorageLimit(limit); err != nil {
+		t.Fatal(err)
+	}
+	got, err := decoder.KittyImageStorageLimit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != limit {
+		t.Fatalf("expected storage limit %d, got %d", limit, got)
+	}
+
+	restored, err := decoder.Ready()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+
+	// Setting the limit after decoding begins is a lifecycle error.
+	err = decoder.SetKittyImageStorageLimit(limit)
+	assertResultError(t, err, ResultInvalidValue)
+
+	images, err := decoder.KittyImageCount(ScreenPrimary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if images != 1 {
+		t.Fatalf("expected one restored image, got %d", images)
+	}
+	pending, err := decoder.KittyImagePendingBytes(ScreenPrimary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending == 0 {
+		t.Fatal("expected pending pixel bytes at READY")
+	}
+	_, err = decoder.KittyImageCount(TerminalScreen(99))
+	assertResultError(t, err, ResultInvalidValue)
+	_, err = decoder.KittyImagePendingBytes(TerminalScreen(99))
+	assertResultError(t, err, ResultInvalidValue)
+
+	imageRecords := 0
+	received := uint64(0)
+	for {
+		advanced, err := decoder.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !advanced {
+			break
+		}
+
+		progress, err := decoder.Progress()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if progress.Kind != SnapshotDecoderProgressKindImage {
+			continue
+		}
+		imageRecords++
+		if progress.Screen != ScreenPrimary {
+			t.Fatalf("expected primary screen image, got %+v", progress)
+		}
+		if progress.ImageID == 0 || progress.ImageFrame != 1 {
+			t.Fatalf("unexpected image progress %+v", progress)
+		}
+		if progress.Rows != 0 || progress.Remaining != 0 {
+			t.Fatalf("expected page fields to be zero for image progress, got %+v", progress)
+		}
+		received += uint64(progress.ImageBytes)
+
+		// The individual getters agree with the combined result, and the
+		// page-only values are unavailable for image progress.
+		id, err := decoder.ProgressImageID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		frame, err := decoder.ProgressImageFrame()
+		if err != nil {
+			t.Fatal(err)
+		}
+		bytes, err := decoder.ProgressImageBytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id != progress.ImageID || frame != progress.ImageFrame || bytes != progress.ImageBytes {
+			t.Fatalf("individual image getters differ from combined result: %+v", progress)
+		}
+		_, err = decoder.ProgressRows()
+		assertResultError(t, err, ResultNoValue)
+		_, err = decoder.ProgressRemaining()
+		assertResultError(t, err, ResultNoValue)
+
+		// The pixels are attached to the restored image.
+		kg, err := restored.KittyGraphics()
+		if err != nil {
+			t.Fatal(err)
+		}
+		img := kg.Image(progress.ImageID)
+		if img == nil {
+			t.Fatalf("expected restored image %d", progress.ImageID)
+		}
+		data, err := img.Data()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if uint(len(data)) != progress.ImageBytes {
+			t.Fatalf("expected %d pixel bytes on image, got %d", progress.ImageBytes, len(data))
+		}
+	}
+	if imageRecords != 1 {
+		t.Fatalf("expected one image record, got %d", imageRecords)
+	}
+	if received != pending {
+		t.Fatalf("expected %d pixel bytes received, got %d", pending, received)
 	}
 }
 
