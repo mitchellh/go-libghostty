@@ -86,6 +86,97 @@ func ExampleRenderStateImageIterator() {
 	// image 1 at (38, 10), size 5x10
 }
 
+// This example reads the image list only on frames where it changed. Most
+// frames only change text, so a renderer can keep drawing the images it
+// read last time.
+func ExampleRenderState_ImagePlacementsGeneration() {
+	term, err := NewTerminal(
+		WithSize(10, 5),
+		WithWritePty(func(*Terminal, []byte) {}),
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer term.Close()
+	if err := term.Resize(10, 5, 10, 10); err != nil {
+		panic(err)
+	}
+	limit := uint64(1 << 20)
+	if err := term.SetKittyImageStorageLimit(&limit); err != nil {
+		panic(err)
+	}
+
+	rs, err := NewRenderState()
+	if err != nil {
+		panic(err)
+	}
+	defer rs.Close()
+
+	images, err := NewRenderStateImageIterator()
+	if err != nil {
+		panic(err)
+	}
+	defer images.Close()
+
+	// The renderer keeps these between frames. The queue holds the images
+	// to draw, and is reused so that reading the list doesn't allocate.
+	var (
+		queue      []RenderStateImageInfo
+		lastGen    uint64
+		haveImages bool
+	)
+
+	// frame updates the render state and reads the image list only if it
+	// changed since the last read.
+	frame := func(name string) {
+		if err := rs.Update(term); err != nil {
+			panic(err)
+		}
+		gen, err := rs.ImagePlacementsGeneration()
+		if err != nil {
+			panic(err)
+		}
+		if haveImages && gen == lastGen {
+			fmt.Printf("%s: reuse %d images\n", name, len(queue))
+			return
+		}
+
+		if err := rs.ImageIterator(images); err != nil {
+			panic(err)
+		}
+		queue = queue[:0]
+		for images.Next() {
+			queue = append(queue, RenderStateImageInfo{})
+			if err := images.InfoInto(&queue[len(queue)-1]); err != nil {
+				panic(err)
+			}
+		}
+		lastGen, haveImages = gen, true
+		fmt.Printf("%s: read %d images\n", name, len(queue))
+	}
+
+	frame("empty screen")
+
+	// Place a 1x1 pixel image at the second row. C=1 keeps the cursor
+	// where it is.
+	term.VTWrite([]byte("\x1b[2;1H\x1b_Ga=T,t=d,f=24,i=1,s=1,v=1,c=1,r=1,C=1,q=2;////\x1b\\"))
+	frame("image placed")
+
+	// Text on another row doesn't change any image.
+	term.VTWrite([]byte("\x1b[4;1Hhello"))
+	frame("text written")
+
+	// Scrolling moves the image.
+	term.VTWrite([]byte("\x1b[5;1H\n"))
+	frame("screen scrolled")
+
+	// Output:
+	// empty screen: read 0 images
+	// image placed: read 1 images
+	// text written: reuse 1 images
+	// screen scrolled: read 1 images
+}
+
 func TestRenderStateImageIteratorEmpty(t *testing.T) {
 	it, err := NewRenderStateImageIterator()
 	if err != nil {
@@ -249,6 +340,47 @@ func TestRenderStateImageIteratorKittyVirtual(t *testing.T) {
 	}
 }
 
+func TestRenderStateImageIteratorInfoInto(t *testing.T) {
+	_, _, it := newImageRenderState(t)
+
+	// Before Next, there is no current image and dst is left unchanged.
+	dst := RenderStateImageInfo{ImageID: 42}
+	if err := it.InfoInto(&dst); !errors.Is(err, ErrInvalidValue) {
+		t.Fatalf("expected ErrInvalidValue, got %v", err)
+	}
+	if dst.ImageID != 42 {
+		t.Fatalf("expected dst unchanged, got %+v", dst)
+	}
+
+	if !it.Next() {
+		t.Fatal("expected a placement")
+	}
+	if err := it.InfoInto(nil); err == nil {
+		t.Fatal("expected error for nil dst")
+	}
+
+	// InfoInto overwrites every field with the same values Info returns.
+	if err := it.InfoInto(&dst); err != nil {
+		t.Fatal(err)
+	}
+	info, err := it.Info()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dst != *info {
+		t.Fatalf("InfoInto %+v differs from Info %+v", dst, *info)
+	}
+
+	// Reading into a caller-owned struct doesn't allocate.
+	if allocs := testing.AllocsPerRun(100, func() {
+		if err := it.InfoInto(&dst); err != nil {
+			t.Fatal(err)
+		}
+	}); allocs != 0 {
+		t.Fatalf("expected no allocations, got %v", allocs)
+	}
+}
+
 func TestRenderStateImageIteratorGetMulti(t *testing.T) {
 	_, _, it := newImageRenderState(t)
 	if !it.Next() {
@@ -299,5 +431,246 @@ func TestRenderStateImageIteratorRefill(t *testing.T) {
 	}
 	if it.Next() {
 		t.Fatal("expected no placements after erasing placeholders")
+	}
+}
+
+// newFixedImageRenderState returns a 10x5 terminal with 10x10 pixel cells
+// and Kitty graphics enabled, plus a render state and image iterator for
+// it. Nothing is drawn yet.
+func newFixedImageRenderState(t *testing.T) (*Terminal, *RenderState, *RenderStateImageIterator) {
+	t.Helper()
+
+	term := newKittyTerminal(t)
+	t.Cleanup(term.Close)
+	if err := term.Resize(10, 5, 10, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(rs.Close)
+
+	it, err := NewRenderStateImageIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(it.Close)
+
+	return term, rs, it
+}
+
+// renderStateImages updates rs from term and returns every image in the
+// refilled iterator.
+func renderStateImages(t *testing.T, term *Terminal, rs *RenderState, it *RenderStateImageIterator) []*RenderStateImageInfo {
+	t.Helper()
+	if err := rs.Update(term); err != nil {
+		t.Fatal(err)
+	}
+	if err := rs.ImageIterator(it); err != nil {
+		t.Fatal(err)
+	}
+	var infos []*RenderStateImageInfo
+	for it.Next() {
+		info, err := it.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		infos = append(infos, info)
+	}
+	return infos
+}
+
+func TestRenderStateImageIteratorKittyFixed(t *testing.T) {
+	term, rs, it := newFixedImageRenderState(t)
+
+	// Place a 1x1 RGB image as placement 5, two columns by one row, at
+	// row 2, column 3. C=1 keeps the cursor where it is.
+	term.VTWrite([]byte("\x1b[3;4H\x1b_Ga=T,t=d,f=24,i=2,p=5,s=1,v=1,c=2,r=1,C=1,q=2;////\x1b\\"))
+
+	infos := renderStateImages(t, term, rs, it)
+	if len(infos) != 1 {
+		t.Fatalf("expected one placement, got %d", len(infos))
+	}
+	info := infos[0]
+	if info.KittyKind != RenderStateKittyPlacementKindFixed {
+		t.Fatalf("expected fixed kind, got %d", info.KittyKind)
+	}
+	if info.ImageID != 2 || info.KittyPlacementID != 5 {
+		t.Fatalf("expected image 2 placement 5, got %d %d", info.ImageID, info.KittyPlacementID)
+	}
+	if info.ViewportCol != 3 || info.ViewportRow != 2 {
+		t.Fatalf("expected position (3, 2), got (%d, %d)", info.ViewportCol, info.ViewportRow)
+	}
+	if info.GridCols != 2 || info.GridRows != 1 {
+		t.Fatalf("expected grid 2x1, got %dx%d", info.GridCols, info.GridRows)
+	}
+
+	// A z-index of 0 draws in front of the text.
+	if info.Z != 0 || info.Layer != RenderStateImageLayerAboveText {
+		t.Fatalf("expected z 0 above text, got %d %d", info.Z, info.Layer)
+	}
+
+	// The render state gives the same geometry as the storage does.
+	kg, err := term.KittyGraphics()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pi, err := NewKittyGraphicsPlacementIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pi.Close()
+	if err := kg.PlacementIterator(pi); err != nil {
+		t.Fatal(err)
+	}
+	if !pi.Next() {
+		t.Fatal("expected a storage placement")
+	}
+	ri, err := pi.RenderInfo(kg.Image(2), term)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ri.ViewportVisible ||
+		ri.ViewportCol != info.ViewportCol || ri.ViewportRow != info.ViewportRow ||
+		ri.PixelWidth != info.PixelWidth || ri.PixelHeight != info.PixelHeight ||
+		ri.SourceWidth != info.SourceWidth || ri.SourceHeight != info.SourceHeight {
+		t.Fatalf("storage %+v disagrees with render state %+v", ri, info)
+	}
+}
+
+func TestRenderStateImageIteratorKittyRelativeToFixed(t *testing.T) {
+	term, rs, it := newFixedImageRenderState(t)
+
+	// A fixed parent at row 1, column 2, and a child placed 3 columns
+	// right of and 2 rows below it.
+	term.VTWrite([]byte("\x1b[2;3H\x1b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=1,c=1,r=1,C=1,q=2;////\x1b\\"))
+	term.VTWrite([]byte("\x1b_Ga=T,t=d,f=24,i=2,p=1,s=1,v=1,c=1,r=1,P=1,Q=1,H=3,V=2,C=1,q=2;////\x1b\\"))
+
+	infos := renderStateImages(t, term, rs, it)
+	if len(infos) != 2 {
+		t.Fatalf("expected two placements, got %d", len(infos))
+	}
+	var child *RenderStateImageInfo
+	for _, info := range infos {
+		if info.ImageID == 2 {
+			child = info
+		}
+	}
+	if child == nil {
+		t.Fatal("expected the child placement")
+	}
+	if child.KittyKind != RenderStateKittyPlacementKindRelative {
+		t.Fatalf("expected relative kind, got %d", child.KittyKind)
+	}
+	if child.ViewportCol != 5 || child.ViewportRow != 3 {
+		t.Fatalf("expected position (5, 3), got (%d, %d)", child.ViewportCol, child.ViewportRow)
+	}
+}
+
+func TestRenderStateImageIteratorKittyFixedPartlyVisible(t *testing.T) {
+	term, rs, it := newFixedImageRenderState(t)
+
+	// Place an image 4 rows tall at the top row, then scroll the screen up
+	// by 2 rows. The image is listed at its full size with its top 2 rows
+	// above the viewport.
+	term.VTWrite([]byte("\x1b[1;1H\x1b_Ga=T,t=d,f=24,i=1,s=1,v=1,c=1,r=4,C=1,q=2;////\x1b\\"))
+	term.VTWrite([]byte("\x1b[5;1H\n\n"))
+
+	infos := renderStateImages(t, term, rs, it)
+	if len(infos) != 1 {
+		t.Fatalf("expected one placement, got %d", len(infos))
+	}
+	if infos[0].ViewportRow != -2 || infos[0].GridRows != 4 {
+		t.Fatalf("expected row -2 covering 4 rows, got %d %d", infos[0].ViewportRow, infos[0].GridRows)
+	}
+
+	// Once it scrolls fully out of the viewport, it is no longer listed.
+	term.VTWrite([]byte("\n\n"))
+	if infos := renderStateImages(t, term, rs, it); len(infos) != 0 {
+		t.Fatalf("expected no placements, got %d", len(infos))
+	}
+}
+
+func TestRenderStateImagePlacementsGeneration(t *testing.T) {
+	term, rs, _ := newFixedImageRenderState(t)
+
+	generation := func() uint64 {
+		t.Helper()
+		if err := rs.Update(term); err != nil {
+			t.Fatal(err)
+		}
+		gen, err := rs.ImagePlacementsGeneration()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return gen
+	}
+
+	// Adding an image changes the generation.
+	empty := generation()
+	term.VTWrite([]byte("\x1b[2;1H\x1b_Ga=T,t=d,f=24,i=1,s=1,v=1,c=1,r=1,C=1,q=2;////\x1b\\"))
+	placed := generation()
+	if placed == empty {
+		t.Fatal("expected a new generation after placing an image")
+	}
+
+	// Writing text on another row and updating again doesn't.
+	term.VTWrite([]byte("\x1b[4;1Hhello"))
+	if gen := generation(); gen != placed {
+		t.Fatalf("expected generation %d after writing text, got %d", placed, gen)
+	}
+
+	// Scrolling moves the image, which does.
+	term.VTWrite([]byte("\x1b[5;1H\n"))
+	if gen := generation(); gen == placed {
+		t.Fatal("expected a new generation after scrolling")
+	}
+
+	// The generation agrees with GetMulti.
+	var gen uint64
+	if err := rs.GetMulti(
+		[]RenderStateData{RenderStateDataImagePlacementsGeneration},
+		[]unsafe.Pointer{unsafe.Pointer(&gen)},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := rs.ImagePlacementsGeneration(); gen != want {
+		t.Fatalf("GetMulti returned %d, want %d", gen, want)
+	}
+}
+
+func TestRenderStateImagePlacementsGenerationDisabled(t *testing.T) {
+	term, err := NewTerminal(WithSize(10, 5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	rs, err := NewRenderState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rs.Close()
+	if err := rs.Update(term); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without Kitty graphics, the generation is always 0.
+	gen, err := rs.ImagePlacementsGeneration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gen != 0 {
+		t.Fatalf("expected 0, got %d", gen)
+	}
+
+	// Renderers read the generation every frame, so it must not allocate.
+	if allocs := testing.AllocsPerRun(100, func() {
+		if _, err := rs.ImagePlacementsGeneration(); err != nil {
+			t.Fatal(err)
+		}
+	}); allocs != 0 {
+		t.Fatalf("expected no allocations, got %v", allocs)
 	}
 }

@@ -184,10 +184,26 @@ const (
 	RenderStateKittyPlacementKindVirtual RenderStateKittyPlacementKind = C.GHOSTTY_RENDER_STATE_KITTY_PLACEMENT_KIND_VIRTUAL
 
 	// RenderStateKittyPlacementKindRelative is a placement that a program
-	// positioned relative to a virtual placement. Its position is measured
-	// from the top-left corner of the virtual placement's placeholder
-	// cells. It is left out when none of those cells are in the viewport.
+	// positioned relative to another placement, called its parent, so that
+	// the two move together. The parent is a fixed or virtual placement,
+	// either directly or through a chain of other relative placements.
+	//
+	// When the parent is a fixed placement, the position is measured from
+	// the parent's cell. The image is listed whenever any part of it is in
+	// the captured rows, even if its parent isn't.
+	//
+	// When the parent is a virtual placement, the position is measured
+	// from the top-left corner of the parent's placeholder cells, which is
+	// the leftmost column and topmost row that any of those cells use. The
+	// image is left out when none of those cells are in the captured rows.
+	//
+	// See [RenderStateImageIterator] for what the captured rows are.
 	RenderStateKittyPlacementKindRelative RenderStateKittyPlacementKind = C.GHOSTTY_RENDER_STATE_KITTY_PLACEMENT_KIND_RELATIVE
+
+	// RenderStateKittyPlacementKindFixed is a placement at a cell on the
+	// screen. It scrolls with the text around it, like a line of output.
+	// The program chooses its z-index, so it can be in any layer.
+	RenderStateKittyPlacementKindFixed RenderStateKittyPlacementKind = C.GHOSTTY_RENDER_STATE_KITTY_PLACEMENT_KIND_FIXED
 )
 
 // RenderStateImageData identifies one value of an image in a render state.
@@ -312,7 +328,8 @@ type RenderStateImageInfo struct {
 	// ImageGeneration changes whenever the image's pixels change, such as
 	// when an animation moves to its next frame. Together with Protocol
 	// and ImageID, it makes a good key for caching textures. For Kitty
-	// images, it equals [KittyGraphicsImage.Generation].
+	// images, it equals [KittyGraphicsImage.Generation]. To know when the
+	// list as a whole changed, use [RenderState.ImagePlacementsGeneration].
 	ImageGeneration uint64
 
 	// Layer says whether to draw the image behind or in front of the text.
@@ -322,14 +339,17 @@ type RenderStateImageInfo struct {
 	// Kitty virtual placements always use -1.
 	Z int32
 
-	// ViewportCol is the column of the image's top-left cell. Column 0 is
-	// the left edge of the viewport. It is negative when the image starts
-	// to the left of the viewport.
+	// ViewportCol is the column of the image's top-left cell, where column
+	// 0 is the left edge of the viewport. Fixed and relative placements
+	// are listed at their full size, so it is negative when one starts to
+	// the left of the viewport. Virtual placements always start inside it.
 	ViewportCol int32
 
-	// ViewportRow is the row of the image's top-left cell. Row 0 is the
-	// top of the viewport. It is negative when the image starts above the
-	// viewport, including in an overscan row.
+	// ViewportRow is the row of the image's top-left cell, where row 0 is
+	// the top of the viewport. It is negative when the image starts above
+	// the viewport, such as in an overscan row. Fixed and relative
+	// placements can start above the first overscan row too. Virtual
+	// placements always start inside the captured rows.
 	ViewportRow int32
 
 	// GridCols is the number of columns the image covers.
@@ -339,13 +359,19 @@ type RenderStateImageInfo struct {
 	GridRows uint32
 
 	// CellOffsetX is the distance in pixels from the left edge of the
-	// top-left cell to the image. An image narrower than its cells is
-	// centered, so the offset can be wider than one cell.
+	// top-left cell to the left edge of the image. For fixed and relative
+	// placements, it is the offset the program asked for, and is always
+	// less than one cell wide. For virtual placements, an image narrower
+	// than its cells is centered, so the offset can be more than one cell
+	// wide.
 	CellOffsetX uint32
 
 	// CellOffsetY is the distance in pixels from the top edge of the
-	// top-left cell to the image. An image shorter than its cells is
-	// centered, so the offset can be taller than one cell.
+	// top-left cell to the top edge of the image. For fixed and relative
+	// placements, it is the offset the program asked for, and is always
+	// less than one cell tall. For virtual placements, an image shorter
+	// than its cells is centered, so the offset can be more than one cell
+	// tall.
 	CellOffsetY uint32
 
 	// PixelWidth is the width to draw the image at, in pixels.
@@ -390,12 +416,32 @@ type RenderStateImageInfo struct {
 // Images are listed in no particular order. Sort them by layer and then by
 // z-index before drawing.
 //
-// For now, the list only includes Kitty graphics images that a program
-// placed with Unicode placeholder characters (U+10EEEE). These images move
-// with the text, so the render state works out where they are during each
-// update. Kitty images placed at a fixed position are not included yet.
-// Read those with a [KittyGraphicsPlacementIterator] and sort both lists
-// together. Later versions may add more protocols and kinds of images.
+// The list holds every Kitty graphics image on screen, however the
+// program placed it:
+//
+//   - At a cell, so the image scrolls with the text
+//     ([RenderStateKittyPlacementKindFixed]).
+//   - With Unicode placeholder characters (U+10EEEE). Each row of
+//     placeholder cells is listed as a separate image
+//     ([RenderStateKittyPlacementKindVirtual]).
+//   - Relative to another placement
+//     ([RenderStateKittyPlacementKindRelative]).
+//
+// The render state works out the position of each image during every
+// update, so a renderer can draw them all the same way. Don't also draw
+// images from a [KittyGraphicsPlacementIterator], or they are drawn
+// twice. Later versions may add more protocols and kinds of images.
+//
+// An image is listed when any part of it is in the captured rows, which
+// are the viewport plus any overscan rows requested with
+// [RenderState.SetOverscan]. Fixed and relative placements are listed at
+// their full size even when only part of them is visible. They can start
+// above or to the left of the viewport, and extend past its right or
+// bottom edge. Clip each image to the area you draw, for example with a
+// clip rectangle.
+//
+// Most frames don't change any image. To skip reading the list on those
+// frames, use [RenderState.ImagePlacementsGeneration].
 //
 // The list is empty unless the terminal has a cell size in pixels, which
 // you set with [Terminal.Resize].
@@ -446,12 +492,32 @@ func (it *RenderStateImageIterator) Next() bool {
 // Info returns every value of the current image. It is faster than
 // calling the individual getters, because it reads all of the values in
 // a single call into libghostty.
+//
+// Info returns a new [RenderStateImageInfo] each time. To reuse one
+// instead, use [RenderStateImageIterator.InfoInto].
 func (it *RenderStateImageIterator) Info() (*RenderStateImageInfo, error) {
-	v := C.render_image_info_get(it.ptr)
-	if err := resultError(v.result); err != nil {
+	info := new(RenderStateImageInfo)
+	if err := it.InfoInto(info); err != nil {
 		return nil, err
 	}
-	return &RenderStateImageInfo{
+	return info, nil
+}
+
+// InfoInto is like [RenderStateImageIterator.Info], but writes the values
+// to dst instead of returning a new struct. Renderers can use it to read
+// the list without allocating, for example by keeping a slice of
+// RenderStateImageInfo and reusing it every frame.
+//
+// If InfoInto returns an error, dst is unchanged.
+func (it *RenderStateImageIterator) InfoInto(dst *RenderStateImageInfo) error {
+	if dst == nil {
+		return errors.New("libghostty: nil RenderStateImageInfo")
+	}
+	v := C.render_image_info_get(it.ptr)
+	if err := resultError(v.result); err != nil {
+		return err
+	}
+	*dst = RenderStateImageInfo{
 		Protocol:         ImageProtocol(v.protocol),
 		ImageID:          uint32(v.image_id),
 		ImageGeneration:  uint64(v.image_generation),
@@ -471,7 +537,8 @@ func (it *RenderStateImageIterator) Info() (*RenderStateImageInfo, error) {
 		SourceHeight:     uint32(v.source_height),
 		KittyPlacementID: uint32(v.kitty_placement_id),
 		KittyKind:        RenderStateKittyPlacementKind(v.kitty_kind),
-	}, nil
+	}
+	return nil
 }
 
 // GetMulti reads several values of the current image in one call. Most
@@ -650,8 +717,8 @@ func (it *RenderStateImageIterator) SourceRect() (x, y, width, height uint32, er
 //
 // For a virtual placement, this is the placement ID that the placeholder
 // cells ask for. Cells that don't ask for a specific placement report 0.
-// For a relative placement, this is the ID the program gave it, or 0 if
-// it didn't give one.
+// For a fixed or relative placement, this is the ID the program gave it,
+// or 0 if it didn't give one.
 //
 // KittyPlacementID returns an error matching [ErrNoValue] when the image
 // is not a Kitty image.

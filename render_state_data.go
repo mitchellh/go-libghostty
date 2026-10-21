@@ -18,6 +18,27 @@ static inline GhosttyRenderStateColors init_render_state_colors() {
 	GhosttyRenderStateColors c = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);
 	return c;
 }
+
+// render_state_u64 is a uint64_t value read from a render state, with the
+// result of reading it.
+typedef struct {
+	GhosttyResult result;
+	uint64_t value;
+} render_state_u64;
+
+// render_state_get_u64 reads a uint64_t value from a render state and
+// returns it by value. Go code could pass C a pointer to a local variable
+// instead, but cgo would then move that variable to the heap, which costs
+// an allocation on every call. Renderers read these values every frame, so
+// the value stays on the C stack instead.
+static inline render_state_u64 render_state_get_u64(
+	GhosttyRenderState state,
+	GhosttyRenderStateData data
+) {
+	render_state_u64 out = {0};
+	out.result = ghostty_render_state_get(state, data, &out.value);
+	return out;
+}
 */
 import "C"
 
@@ -60,6 +81,11 @@ const (
 	// the image placements from the last update
 	// (GhosttyRenderStateImageIterator).
 	RenderStateDataImageIterator RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR
+
+	// RenderStateDataImagePlacementsGeneration changes whenever an update
+	// changes the images listed by [RenderStateDataImageIterator]
+	// (uint64_t). See [RenderState.ImagePlacementsGeneration].
+	RenderStateDataImagePlacementsGeneration RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_IMAGE_PLACEMENTS_GENERATION
 
 	// RenderStateDataColorBackground is the default/current background
 	// color (GhosttyColorRgb).
@@ -380,14 +406,52 @@ func (rs *RenderState) Dirty() (RenderStateDirty, error) {
 // reading any values.
 //
 // The values in iter stay valid until the next call to [RenderState.Update].
-// Call ImageIterator again after every update. The same iterator can be
-// reused each time.
+// After each update, call ImageIterator again before reading iter. The
+// same iterator can be reused each time. To skip reading the list on
+// frames where no image changed, use [RenderState.ImagePlacementsGeneration].
 func (rs *RenderState) ImageIterator(iter *RenderStateImageIterator) error {
 	return resultError(C.ghostty_render_state_get(
 		rs.ptr,
 		C.GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR,
 		unsafe.Pointer(&iter.ptr),
 	))
+}
+
+// ImagePlacementsGeneration returns a value that changes whenever an
+// update changes the images listed by [RenderState.ImageIterator].
+//
+// Most frames don't change any image. A renderer can save this value each
+// time it reads the image list, then skip reading the list on later
+// frames while the value stays the same. See the example.
+//
+// The value changes when an update adds, removes, or moves an image,
+// changes which part of an image is shown, or changes an image's pixels.
+// It stays the same when only text changes, unless the rows that changed
+// held Kitty placeholder cells before or after the change.
+//
+// A new value means the list may have changed, not that it did. For
+// example, the value also changes when a program rewrites a row that holds
+// placeholder cells, or changes any image while images shown with
+// placeholder cells are on screen, even if every image stays where it was.
+//
+// Compare values only for equality, and only with values from the same
+// render state. The value wraps around, so a larger value is not
+// necessarily a newer one. It is always 0 when Kitty graphics are
+// disabled.
+//
+// The value describes the list as a whole. To know when the pixels of one
+// image changed, use [RenderStateImageInfo.ImageGeneration].
+//
+// ImagePlacementsGeneration doesn't allocate, so it is cheap to call
+// every frame.
+//
+// C: GHOSTTY_RENDER_STATE_DATA_IMAGE_PLACEMENTS_GENERATION
+func (rs *RenderState) ImagePlacementsGeneration() (uint64, error) {
+	v := C.render_state_get_u64(rs.ptr, C.GHOSTTY_RENDER_STATE_DATA_IMAGE_PLACEMENTS_GENERATION)
+	if err := resultError(v.result); err != nil {
+		return 0, err
+	}
+	return uint64(v.value), nil
 }
 
 // RowIterator initializes ri to iterate over the rows from the last update.

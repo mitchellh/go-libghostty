@@ -178,13 +178,28 @@ type KittyGraphicsImage struct {
 // must therefore be serialized with mutations of the terminal that
 // produced it.
 //
+// The iterator lists every placement in the storage, including virtual
+// placements and placements that are off screen. Use it in tools such as
+// debuggers and tests that need to see what the storage holds.
+//
+// Renderers should use [RenderStateImageIterator] instead. It lists every
+// image on screen with its position already worked out. Drawing from both
+// lists draws each image twice.
+//
 // C: GhosttyKittyGraphicsPlacementIterator
 type KittyGraphicsPlacementIterator struct {
 	ptr C.GhosttyKittyGraphicsPlacementIterator
 }
 
-// KittyPlacementLayer classifies z-layer for kitty graphics placements.
-// Based on the kitty protocol z-index conventions.
+// KittyPlacementLayer selects which placements a
+// [KittyGraphicsPlacementIterator] returns. Set it with
+// [KittyGraphicsPlacementIterator.SetLayer]. The Kitty graphics protocol
+// assigns each placement a layer based on its z-index, as described on
+// each value below.
+//
+// This filter only applies to the storage iterator. When drawing, use
+// [RenderStateImageInfo.Layer] instead. It follows the same rules and
+// also covers virtual placements.
 //
 // C: GhosttyKittyPlacementLayer
 type KittyPlacementLayer int
@@ -351,6 +366,9 @@ type KittyGraphicsPlacementInfo struct {
 // placement in a single struct. Combines pixel size, grid size, viewport
 // position, and source rectangle into one cgo call.
 //
+// Use it to inspect the storage. When drawing, use [RenderStateImageInfo]
+// instead, which has the same values for every image on screen.
+//
 // C: GhosttyKittyGraphicsPlacementRenderInfo
 type KittyGraphicsPlacementRenderInfo struct {
 	// PixelWidth is the rendered width in pixels.
@@ -373,9 +391,11 @@ type KittyGraphicsPlacementRenderInfo struct {
 	// for partially visible placements).
 	ViewportRow int32
 
-	// ViewportVisible is false when the placement is fully off-screen
-	// or is a virtual placement. When false, ViewportCol and ViewportRow
-	// may contain meaningless values.
+	// ViewportVisible reports whether any part of the placement is in the
+	// viewport. It is false when the placement is entirely outside the
+	// viewport. It is also false for virtual placements and placements
+	// relative to them, because the storage can't tell where those are.
+	// When ViewportVisible is false, ignore ViewportCol and ViewportRow.
 	ViewportVisible bool
 
 	// SourceX is the resolved source rectangle x origin in pixels.
@@ -402,9 +422,18 @@ func (kg *KittyGraphics) PlacementIterator(iter *KittyGraphicsPlacementIterator)
 	))
 }
 
-// Generation returns the process-wide mutation stamp for this image storage.
-// If unchanged, the placements and image contents are identical to the prior
-// observation. Placement geometry may still have changed.
+// Generation returns a value that changes whenever a program sends,
+// replaces, places, or deletes an image. If it matches a value read
+// earlier, the storage holds the same images and placements as it did
+// then. A value is never reused, even by another screen, after a reset, or
+// by another terminal, so it is safe to use as a cache key on its own.
+//
+// Placements can move on screen without changing this value, because
+// scrolling and resizing don't change the storage. To know when to read
+// the render state's image list again, use
+// [RenderState.ImagePlacementsGeneration]. Generation is useful for work
+// that depends only on what the storage holds, such as freeing the
+// textures of deleted images.
 func (kg *KittyGraphics) Generation() (uint64, error) {
 	var generation C.uint64_t
 	if err := resultError(C.ghostty_kitty_graphics_get(
@@ -902,8 +931,9 @@ func (it *KittyGraphicsPlacementIterator) PlacementID() (uint32, error) {
 // (unicode placeholder) placement.
 //
 // A virtual placement has no position of its own. It is drawn wherever
-// the terminal shows placeholder cells for it, so use
-// [RenderStateImageIterator] to find where to draw it.
+// the terminal shows placeholder cells for it. [RenderStateImageIterator]
+// finds those cells and positions the image like any other, so renderers
+// don't need to check IsVirtual.
 func (it *KittyGraphicsPlacementIterator) IsVirtual() (bool, error) {
 	var v C.bool
 	if err := resultError(C.ghostty_kitty_graphics_placement_get(
@@ -1126,10 +1156,13 @@ func (it *KittyGraphicsPlacementIterator) Info() (*KittyGraphicsPlacementInfo, e
 // in a single call. This combines the results of PixelSize, GridSize,
 // ViewportPos, and SourceRect into one cgo call.
 //
-// When ViewportVisible is false, the placement is fully off-screen or
-// is a virtual placement; ViewportCol and ViewportRow may contain
-// meaningless values in that case. To get the same information for
-// virtual placements, use [RenderStateImageIterator].
+// Use it to inspect the storage. When drawing, use
+// [RenderStateImageIterator] instead. It has the same values for every
+// image on screen, including virtual placements and placements relative
+// to them. Drawing from both draws each image twice.
+//
+// RenderInfo succeeds even when the placement isn't in the viewport.
+// Check ViewportVisible before using ViewportCol and ViewportRow.
 func (it *KittyGraphicsPlacementIterator) RenderInfo(img *KittyGraphicsImage, t *Terminal) (*KittyGraphicsPlacementRenderInfo, error) {
 	ci := C.init_kitty_placement_render_info()
 	if err := resultError(C.ghostty_kitty_graphics_placement_render_info(
@@ -1206,11 +1239,17 @@ func (it *KittyGraphicsPlacementIterator) GridSize(img *KittyGraphicsImage, t *T
 	return uint32(c), uint32(r), nil
 }
 
-// ViewportPos returns the viewport-relative grid position of the
-// current placement. The row can be negative for partially visible
-// placements. Returns an error with ResultNoValue when fully
-// off-screen or for virtual placements. To position virtual placements
-// and the placements attached to them, use [RenderStateImageIterator].
+// ViewportPos returns the column and row of the current placement's
+// top-left cell, relative to the viewport. The row is negative when the
+// top of the placement has scrolled above the viewport.
+//
+// ViewportPos returns an error matching [ErrNoValue] when the placement
+// is entirely outside the viewport, is a virtual placement, or is
+// relative to a virtual placement.
+//
+// Use it to inspect the storage. When drawing, use
+// [RenderStateImageIterator] instead, which positions every image on
+// screen. Drawing from both draws each image twice.
 func (it *KittyGraphicsPlacementIterator) ViewportPos(img *KittyGraphicsImage, t *Terminal) (col, row int32, err error) {
 	var c, r C.int32_t
 	if err := resultError(C.ghostty_kitty_graphics_placement_viewport_pos(
