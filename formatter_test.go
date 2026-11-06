@@ -182,7 +182,7 @@ func TestFormatterSelection(t *testing.T) {
 		WithFormatterFormat(FormatterFormatVT),
 		WithFormatterTrim(true),
 		WithFormatterSelection(second),
-		WithFormatterExtraCursor(true),
+		WithFormatterExtras(FormatterExtraCursor),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -390,5 +390,266 @@ func TestFormatterFormatBuf(t *testing.T) {
 	}
 	if !strings.Contains(string(buf[:written]), "buffer format") {
 		t.Fatalf("expected formatted contents, got %q", buf[:written])
+	}
+}
+
+// TestFormatterDefaults pins the options a new formatter starts with. These are
+// libghostty's defaults, and NewFormatter doesn't change them.
+func TestFormatterDefaults(t *testing.T) {
+	term, err := NewTerminal(WithSize(20, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	f, err := NewFormatter(term)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	if got, err := f.Emit(); err != nil || got != FormatterFormatPlain {
+		t.Fatalf("Emit() = %v, %v", got, err)
+	}
+	if got, err := f.Unwrap(); err != nil || got {
+		t.Fatalf("Unwrap() = %v, %v", got, err)
+	}
+	if got, err := f.Trim(); err != nil || !got {
+		t.Fatalf("Trim() = %v, %v", got, err)
+	}
+	if got, err := f.Extras(); err != nil || got != FormatterExtrasDefault {
+		t.Fatalf("Extras() = %#x, %v", got, err)
+	}
+	if got, err := f.Selection(); err != nil || got != nil {
+		t.Fatalf("Selection() = %v, %v", got, err)
+	}
+}
+
+// TestFormatterSetters checks that each option reads back what was set and that
+// a change applies to the next format call on the same formatter.
+func TestFormatterSetters(t *testing.T) {
+	term, err := NewTerminal(WithSize(20, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.VTWrite([]byte("\x1b[1mbold\x1b[0m   "))
+
+	f, err := NewFormatter(term)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	plain, err := f.FormatString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plain != "bold" {
+		t.Fatalf("expected trimmed plain output, got %q", plain)
+	}
+
+	if err := f.SetEmit(FormatterFormatVT); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.Emit(); err != nil || got != FormatterFormatVT {
+		t.Fatalf("Emit() = %v, %v", got, err)
+	}
+	styled, err := f.FormatString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(styled, "\x1b[") {
+		t.Fatalf("expected VT output after SetEmit, got %q", styled)
+	}
+
+	if err := f.SetEmit(FormatterFormatPlain); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetTrim(false); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.Trim(); err != nil || got {
+		t.Fatalf("Trim() = %v, %v", got, err)
+	}
+	untrimmed, err := f.FormatString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(untrimmed, "bold   ") {
+		t.Fatalf("expected untrimmed output, got %q", untrimmed)
+	}
+
+	if err := f.SetUnwrap(true); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.Unwrap(); err != nil || !got {
+		t.Fatalf("Unwrap() = %v, %v", got, err)
+	}
+}
+
+// TestFormatterExtras checks that extras combine as a bitmask and take effect:
+// the cursor extra is the one that adds a CUP sequence to VT output.
+func TestFormatterExtras(t *testing.T) {
+	term, err := NewTerminal(WithSize(20, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.VTWrite([]byte("hi"))
+
+	f, err := NewFormatter(
+		term,
+		WithFormatterFormat(FormatterFormatVT),
+		WithFormatterExtras(FormatterExtrasNone),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	without, err := f.FormatString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(without, "H") {
+		t.Fatalf("expected no cursor sequence, got %q", without)
+	}
+
+	extras := FormatterExtraCursor | FormatterExtraPalette
+	if err := f.SetExtras(extras); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.Extras(); err != nil || got != extras {
+		t.Fatalf("Extras() = %#x, %v", got, err)
+	}
+	with, err := f.FormatString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(with, "\x1b[1;3H") {
+		t.Fatalf("expected trailing cursor position, got %q", with)
+	}
+
+	// A bit with no meaning is rejected and keeps the previous value.
+	if err := f.SetExtras(FormatterExtrasAll + 1); !errors.Is(err, ErrInvalidValue) {
+		t.Fatalf("expected invalid value, got %v", err)
+	}
+	if got, err := f.Extras(); err != nil || got != extras {
+		t.Fatalf("Extras() after rejected set = %#x, %v", got, err)
+	}
+}
+
+// TestFormatterSelectionOption checks setting, reading back, and clearing a
+// selection on an existing formatter.
+func TestFormatterSelectionOption(t *testing.T) {
+	term, err := NewTerminal(WithSize(20, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.VTWrite([]byte("hello world"))
+
+	ref, err := term.GridRef(Point{Tag: PointTagActive, X: 1, Y: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	word, err := term.SelectWord(SelectWordOptions{Ref: ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := NewFormatter(term)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	if err := f.SetSelection(word); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.FormatString(); err != nil || got != "hello" {
+		t.Fatalf("FormatString() = %q, %v", got, err)
+	}
+	sel, err := f.Selection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel == nil {
+		t.Fatal("expected the selection to read back")
+	}
+	equal, err := term.SelectionEqual(sel, word)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equal {
+		t.Fatal("expected the selection to read back unchanged")
+	}
+
+	if err := f.SetSelection(nil); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := f.Selection(); err != nil || got != nil {
+		t.Fatalf("Selection() after clear = %v, %v", got, err)
+	}
+	if got, err := f.FormatString(); err != nil || got != "hello world" {
+		t.Fatalf("FormatString() after clear = %q, %v", got, err)
+	}
+}
+
+// TestNewFormatterOptionError checks that an option libghostty rejects fails
+// construction rather than leaving a half-configured formatter behind.
+func TestNewFormatterOptionError(t *testing.T) {
+	term, err := NewTerminal(WithSize(20, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	f, err := NewFormatter(term, WithFormatterFormat(FormatterFormat(99)))
+	if !errors.Is(err, ErrInvalidValue) {
+		t.Fatalf("expected invalid value, got %v", err)
+	}
+	if f != nil {
+		t.Fatal("expected no formatter")
+	}
+}
+
+// TestFormatterHTMLPaletteExtra pins what the palette extra means for HTML:
+// palette colors are CSS variables, and the extra is what defines them.
+func TestFormatterHTMLPaletteExtra(t *testing.T) {
+	term, err := NewTerminal(WithSize(20, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	term.VTWrite([]byte("\x1b[31mred\x1b[0m"))
+
+	f, err := NewFormatter(term, WithFormatterFormat(FormatterFormatHTML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	with, err := f.FormatString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(with, "--vt-palette-1:") {
+		t.Fatalf("expected the palette to be defined, got %q", with)
+	}
+
+	if err := f.SetExtras(FormatterExtrasNone); err != nil {
+		t.Fatal(err)
+	}
+	without, err := f.FormatString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(without, "--vt-palette-1:") {
+		t.Fatalf("expected no palette definitions, got %q", without)
+	}
+	if !strings.Contains(without, "var(--vt-palette-1)") {
+		t.Fatalf("expected the cell to refer to the palette, got %q", without)
 	}
 }

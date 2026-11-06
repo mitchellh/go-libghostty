@@ -3,6 +3,7 @@ package libghostty
 import (
 	"bytes"
 	"errors"
+	"math"
 	"slices"
 	"testing"
 )
@@ -837,16 +838,30 @@ func TestTerminalSetScrollbackLimits(t *testing.T) {
 		t.Fatalf("expected 100-line limit, got %v", lines)
 	}
 
+	// The byte limit has a real default, so nil restores it rather than
+	// removing the limit. The maximum value is what removes it.
 	if err := term.SetScrollbackMaxBytes(nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := term.SetScrollbackMaxLines(nil); err != nil {
+	if bytes, err := term.ScrollbackMaxBytes(); err != nil {
+		t.Fatal(err)
+	} else if bytes == nil || *bytes != 10_000 {
+		t.Fatalf("expected default 10,000-byte limit, got %v", bytes)
+	}
+	unlimited := uint(math.MaxUint)
+	if err := term.SetScrollbackMaxBytes(&unlimited); err != nil {
 		t.Fatal(err)
 	}
 	if bytes, err := term.ScrollbackMaxBytes(); err != nil {
 		t.Fatal(err)
 	} else if bytes != nil {
 		t.Fatalf("expected unlimited byte limit, got %v", *bytes)
+	}
+
+	// There is no default line limit, so nil and the maximum value both remove
+	// it.
+	if err := term.SetScrollbackMaxLines(nil); err != nil {
+		t.Fatal(err)
 	}
 	if lines, err := term.ScrollbackMaxLines(); err != nil {
 		t.Fatal(err)
@@ -862,7 +877,7 @@ func TestTerminalAdditionalOptions(t *testing.T) {
 	}
 	defer term.Close()
 
-	style := TerminalCursorStyleBar
+	style := CursorStyleBar
 	blink := true
 	if err := term.SetDefaultCursorStyle(&style); err != nil {
 		t.Fatal(err)

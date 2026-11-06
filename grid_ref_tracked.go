@@ -68,7 +68,7 @@ func (g *TrackedGridRef) Set(t *Terminal, point Point) error {
 // as [Terminal.GridRef]: use it immediately and do not retain it across later
 // terminal mutations.
 func (g *TrackedGridRef) Snapshot() (*GridRef, error) {
-	ref := initCGridRef()
+	var ref C.GhosttyGridRef
 	if err := resultError(C.ghostty_tracked_grid_ref_snapshot(g.ptr, &ref)); err != nil {
 		return nil, err
 	}

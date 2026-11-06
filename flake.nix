@@ -31,7 +31,7 @@
 
           shellHook =
             ''
-              export PKG_CONFIG_PATH="$PWD/build/_deps/ghostty-src/zig-out/share/pkgconfig''${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+              export PKG_CONFIG_PATH="$PWD/build/_deps/ghostty-src/zig-out/lib/pkgconfig''${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
               export DYLD_LIBRARY_PATH="$PWD/build/_deps/ghostty-src/zig-out/lib''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
               export LD_LIBRARY_PATH="$PWD/build/_deps/ghostty-src/zig-out/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             ''

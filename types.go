@@ -135,6 +135,78 @@ func (a *cGhosttyStringArray) close() {
 	a.buffers = nil
 }
 
+// CursorStyle is the shape of the cursor. Programs change it with the DECSCUSR
+// escape sequence (CSI Ps SP q). [RenderState.CursorVisualStyle] reports the
+// shape to draw, and [Terminal.SetDefaultCursorStyle] sets the shape that
+// DECSCUSR 0 restores.
+//
+// C: GhosttyCursorStyle
+type CursorStyle int
+
+const (
+	// CursorStyleBar is a bar cursor (DECSCUSR 5, 6).
+	CursorStyleBar CursorStyle = C.GHOSTTY_CURSOR_STYLE_BAR
+
+	// CursorStyleBlock is a block cursor (DECSCUSR 1, 2).
+	CursorStyleBlock CursorStyle = C.GHOSTTY_CURSOR_STYLE_BLOCK
+
+	// CursorStyleUnderline is an underline cursor (DECSCUSR 3, 4).
+	CursorStyleUnderline CursorStyle = C.GHOSTTY_CURSOR_STYLE_UNDERLINE
+
+	// CursorStyleBlockHollow is a hollow block cursor.
+	CursorStyleBlockHollow CursorStyle = C.GHOSTTY_CURSOR_STYLE_BLOCK_HOLLOW
+)
+
+// ImageLayer says whether an image is drawn behind or in front of the
+// terminal's text. The Kitty graphics protocol assigns each placement a layer
+// based on its z-index, as described on each value below.
+//
+// Draw a frame from back to front in this order:
+//
+//  1. Images in [ImageLayerBelowBackground].
+//  2. Cell background colors.
+//  3. Images in [ImageLayerBelowText].
+//  4. Text.
+//  5. Images in [ImageLayerAboveText].
+//
+// Within one layer, draw images with a lower z-index first.
+//
+// C: GhosttyImageLayer
+type ImageLayer int
+
+const (
+	// ImageLayerBelowBackground draws the image behind the cell background
+	// colors (z < INT32_MIN/2).
+	ImageLayerBelowBackground ImageLayer = C.GHOSTTY_IMAGE_LAYER_BELOW_BACKGROUND
+
+	// ImageLayerBelowText draws the image in front of the cell background
+	// colors and behind the text (INT32_MIN/2 <= z < 0).
+	ImageLayerBelowText ImageLayer = C.GHOSTTY_IMAGE_LAYER_BELOW_TEXT
+
+	// ImageLayerAboveText draws the image in front of the text (z >= 0).
+	ImageLayerAboveText ImageLayer = C.GHOSTTY_IMAGE_LAYER_ABOVE_TEXT
+)
+
+// ImageLayerMask selects any number of image layers. Combine values with |.
+// Use it with [KittyGraphicsPlacementIterator.SetLayers].
+//
+// C: GHOSTTY_IMAGE_LAYER_MASK_*
+type ImageLayerMask uint32
+
+const (
+	// ImageLayerMaskBelowBackground selects [ImageLayerBelowBackground].
+	ImageLayerMaskBelowBackground ImageLayerMask = C.GHOSTTY_IMAGE_LAYER_MASK_BELOW_BACKGROUND
+
+	// ImageLayerMaskBelowText selects [ImageLayerBelowText].
+	ImageLayerMaskBelowText ImageLayerMask = C.GHOSTTY_IMAGE_LAYER_MASK_BELOW_TEXT
+
+	// ImageLayerMaskAboveText selects [ImageLayerAboveText].
+	ImageLayerMaskAboveText ImageLayerMask = C.GHOSTTY_IMAGE_LAYER_MASK_ABOVE_TEXT
+
+	// ImageLayerMaskAll selects every layer.
+	ImageLayerMaskAll = ImageLayerMaskBelowBackground | ImageLayerMaskBelowText | ImageLayerMaskAboveText
+)
+
 // TypeJSON returns the process-lifetime, versioned libghostty-vt C type
 // manifest for the current target. The manifest describes all public types,
 // including layouts, enum values, union fields, and packed bit layouts.

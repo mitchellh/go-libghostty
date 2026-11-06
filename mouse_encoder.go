@@ -24,7 +24,7 @@ import "unsafe"
 //
 // Basic usage:
 //  1. Create an encoder with NewMouseEncoder.
-//  2. Configure options with SetOpt* methods or SetOptFromTerminal.
+//  2. Configure options with the Set* methods or SetFromTerminal.
 //  3. Create mouse events, encode them with Encode, and free them.
 //  4. Free the encoder with Close when done.
 //
@@ -98,8 +98,8 @@ type MouseEncoderSize struct {
 	PaddingLeft uint32
 }
 
-// MouseEncoderOption identifies a mouse encoder configuration option
-// for use with SetOpt.
+// MouseEncoderOption identifies a mouse encoder configuration option.
+// Each one has its own setter on [MouseEncoder].
 //
 // C: GhosttyMouseEncoderOption
 type MouseEncoderOption int
@@ -147,20 +147,20 @@ func (enc *MouseEncoder) Close() {
 	enc.ptr = nil
 }
 
-// SetOptTrackingMode sets the mouse tracking mode on the encoder.
-func (enc *MouseEncoder) SetOptTrackingMode(mode MouseTrackingMode) {
+// SetTrackingMode sets the mouse tracking mode on the encoder.
+func (enc *MouseEncoder) SetTrackingMode(mode MouseTrackingMode) error {
 	v := C.GhosttyMouseTrackingMode(mode)
-	C.ghostty_mouse_encoder_setopt(enc.ptr, C.GHOSTTY_MOUSE_ENCODER_OPT_EVENT, unsafe.Pointer(&v))
+	return resultError(C.ghostty_mouse_encoder_set(enc.ptr, C.GHOSTTY_MOUSE_ENCODER_OPT_EVENT, unsafe.Pointer(&v)))
 }
 
-// SetOptFormat sets the mouse output format on the encoder.
-func (enc *MouseEncoder) SetOptFormat(format MouseFormat) {
+// SetFormat sets the mouse output format on the encoder.
+func (enc *MouseEncoder) SetFormat(format MouseFormat) error {
 	v := C.GhosttyMouseFormat(format)
-	C.ghostty_mouse_encoder_setopt(enc.ptr, C.GHOSTTY_MOUSE_ENCODER_OPT_FORMAT, unsafe.Pointer(&v))
+	return resultError(C.ghostty_mouse_encoder_set(enc.ptr, C.GHOSTTY_MOUSE_ENCODER_OPT_FORMAT, unsafe.Pointer(&v)))
 }
 
-// SetOptSize sets the renderer size context on the encoder.
-func (enc *MouseEncoder) SetOptSize(s MouseEncoderSize) {
+// SetSize sets the renderer size context on the encoder.
+func (enc *MouseEncoder) SetSize(s MouseEncoderSize) error {
 	cs := C.init_mouse_encoder_size()
 	cs.screen_width = C.uint32_t(s.ScreenWidth)
 	cs.screen_height = C.uint32_t(s.ScreenHeight)
@@ -170,35 +170,38 @@ func (enc *MouseEncoder) SetOptSize(s MouseEncoderSize) {
 	cs.padding_bottom = C.uint32_t(s.PaddingBottom)
 	cs.padding_right = C.uint32_t(s.PaddingRight)
 	cs.padding_left = C.uint32_t(s.PaddingLeft)
-	C.ghostty_mouse_encoder_setopt(enc.ptr, C.GHOSTTY_MOUSE_ENCODER_OPT_SIZE, unsafe.Pointer(&cs))
+	return resultError(C.ghostty_mouse_encoder_set(enc.ptr, C.GHOSTTY_MOUSE_ENCODER_OPT_SIZE, unsafe.Pointer(&cs)))
 }
 
-// SetOptAnyButtonPressed sets whether any mouse button is currently
+// SetAnyButtonPressed sets whether any mouse button is currently
 // pressed.
-func (enc *MouseEncoder) SetOptAnyButtonPressed(pressed bool) {
+func (enc *MouseEncoder) SetAnyButtonPressed(pressed bool) error {
 	v := C.bool(pressed)
-	C.ghostty_mouse_encoder_setopt(enc.ptr, C.GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, unsafe.Pointer(&v))
+	return resultError(C.ghostty_mouse_encoder_set(enc.ptr, C.GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, unsafe.Pointer(&v)))
 }
 
-// SetOptTrackLastCell enables or disables motion deduplication by
+// SetTrackLastCell enables or disables motion deduplication by
 // last cell.
-func (enc *MouseEncoder) SetOptTrackLastCell(track bool) {
+func (enc *MouseEncoder) SetTrackLastCell(track bool) error {
 	v := C.bool(track)
-	C.ghostty_mouse_encoder_setopt(enc.ptr, C.GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL, unsafe.Pointer(&v))
+	return resultError(C.ghostty_mouse_encoder_set(enc.ptr, C.GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL, unsafe.Pointer(&v)))
 }
 
-// SetOptFromTerminal reads the terminal's current mouse tracking mode
+// SetFromTerminal reads the terminal's current mouse tracking mode
 // and output format and applies them to the encoder. It does not
-// modify size or any-button state. The caller must serialize access to
-// both the encoder and the terminal during this call.
-func (enc *MouseEncoder) SetOptFromTerminal(t *Terminal) {
-	C.ghostty_mouse_encoder_setopt_from_terminal(enc.ptr, t.ptr)
+// modify size or any-button state. It does clear the last tracked cell,
+// so motion deduplication starts over and calling this before every
+// event defeats [MouseEncoder.SetTrackLastCell]. The caller must
+// serialize access to both the encoder and the terminal during this
+// call.
+func (enc *MouseEncoder) SetFromTerminal(t *Terminal) error {
+	return resultError(C.ghostty_mouse_encoder_set_from_terminal(enc.ptr, t.ptr))
 }
 
 // Reset clears internal encoder state such as motion deduplication
 // (last tracked cell).
-func (enc *MouseEncoder) Reset() {
-	C.ghostty_mouse_encoder_reset(enc.ptr)
+func (enc *MouseEncoder) Reset() error {
+	return resultError(C.ghostty_mouse_encoder_reset(enc.ptr))
 }
 
 // Encode encodes a mouse event into a terminal escape sequence and
@@ -212,7 +215,7 @@ func (enc *MouseEncoder) Encode(event *MouseEvent) ([]byte, error) {
 	result := C.ghostty_mouse_encoder_encode(
 		enc.ptr,
 		event.ptr,
-		(*C.char)(unsafe.Pointer(&buf[0])),
+		(*C.uint8_t)(unsafe.Pointer(&buf[0])),
 		C.size_t(len(buf)),
 		&outLen,
 	)
@@ -233,7 +236,7 @@ func (enc *MouseEncoder) Encode(event *MouseEvent) ([]byte, error) {
 		if err := resultError(C.ghostty_mouse_encoder_encode(
 			enc.ptr,
 			event.ptr,
-			(*C.char)(unsafe.Pointer(&dynBuf[0])),
+			(*C.uint8_t)(unsafe.Pointer(&dynBuf[0])),
 			outLen,
 			&written,
 		)); err != nil {

@@ -38,6 +38,13 @@ const (
 	// The caller may confirm with the user and retry with the operation's allow
 	// flag set.
 	ResultRejected Result = C.GHOSTTY_REJECTED
+
+	// ResultUnsupported indicates that the library does not support the
+	// request. Either the loaded library is older than the headers this package
+	// was built with and does not know the key, or the library was built
+	// without the feature the call needs. Compare [ResultInvalidValue], which
+	// means the library knows the key but something passed with it is wrong.
+	ResultUnsupported Result = C.GHOSTTY_UNSUPPORTED
 )
 
 // Error holds a non-success Ghostty result.
@@ -77,6 +84,9 @@ var (
 
 	// ErrRejected matches [ResultRejected].
 	ErrRejected error = &Error{Result: ResultRejected}
+
+	// ErrUnsupported matches [ResultUnsupported].
+	ErrUnsupported error = &Error{Result: ResultUnsupported}
 )
 
 // Is reports whether target is a non-nil [*Error] with the same Result.
@@ -104,6 +114,8 @@ func (e *Error) Error() string {
 		return "ghostty: limit exceeded"
 	case ResultRejected:
 		return "ghostty: rejected"
+	case ResultUnsupported:
+		return "ghostty: unsupported"
 	default:
 		return fmt.Sprintf("ghostty: result=%d", int(e.Result))
 	}

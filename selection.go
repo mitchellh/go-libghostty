@@ -26,12 +26,6 @@ static inline GhosttyTerminalSelectLineOptions init_terminal_select_line_options
 	return opts;
 }
 
-// Helper to create a properly initialized
-// GhosttyTerminalSelectionFormatOptions (sized struct).
-static inline GhosttyTerminalSelectionFormatOptions init_terminal_selection_format_options() {
-	GhosttyTerminalSelectionFormatOptions opts = GHOSTTY_INIT_SIZED(GhosttyTerminalSelectionFormatOptions);
-	return opts;
-}
 */
 import "C"
 
@@ -359,55 +353,9 @@ type SelectOutputOptions struct {
 	Ref *GridRef
 }
 
-// SelectionFormatOption configures one-shot terminal selection formatting.
-type SelectionFormatOption func(*selectionFormatOpts)
-
-// selectionFormatOpts wraps the C options struct so functional options can
-// mutate only the fields the caller explicitly wants to set.
-type selectionFormatOpts struct {
-	c         C.GhosttyTerminalSelectionFormatOptions
-	selection *Selection
-}
-
-// WithSelectionFormat sets the output format (plain, VT, or HTML).
-// Defaults to FormatterFormatPlain if not specified.
-func WithSelectionFormat(f FormatterFormat) SelectionFormatOption {
-	return func(o *selectionFormatOpts) {
-		o.c.emit = C.GhosttyFormatterFormat(f)
-	}
-}
-
-// WithSelectionUnwrap enables unwrapping of soft-wrapped lines.
-func WithSelectionUnwrap(unwrap bool) SelectionFormatOption {
-	return func(o *selectionFormatOpts) {
-		o.c.unwrap = C.bool(unwrap)
-	}
-}
-
-// WithSelectionTrim controls whether trailing whitespace is removed from
-// lines that contain text.
-//
-// Blank lines at the end of the output are always removed. The one
-// exception is [FormatterFormatVT] output with trim set to false, which
-// keeps those lines so that the output reproduces the screen layout.
-func WithSelectionTrim(trim bool) SelectionFormatOption {
-	return func(o *selectionFormatOpts) {
-		o.c.trim = C.bool(trim)
-	}
-}
-
-// WithSelection formats the provided selection snapshot instead of the
-// terminal's active selection. The selection must come from the same terminal
-// and remain valid for the duration of the format call.
-func WithSelection(sel *Selection) SelectionFormatOption {
-	return func(o *selectionFormatOpts) {
-		o.selection = sel
-	}
-}
-
-// toC converts a Go Selection into a C GhosttySelection sized struct.
+// toC converts a Go Selection into a C GhosttySelection.
 func (s Selection) toC() C.GhosttySelection {
-	cs := initCSelection()
+	var cs C.GhosttySelection
 	cs.start = s.Start.ref
 	cs.end = s.End.ref
 	cs.rectangle = C.bool(s.Rectangle)
@@ -462,7 +410,7 @@ func (g *SelectionGesture) Reset(t *Terminal) {
 // resulting selection snapshot. It returns nil when the event updates gesture
 // state but does not currently produce a selection.
 func (g *SelectionGesture) Event(t *Terminal, event *SelectionGestureEvent) (*Selection, error) {
-	cs := initCSelection()
+	var cs C.GhosttySelection
 	if err := resultError(C.ghostty_selection_gesture_event(g.ptr, t.ptr, event.ptr, &cs)); err != nil {
 		return noValueNilSelection(err)
 	}
@@ -555,7 +503,7 @@ func (g *SelectionGesture) Behavior(t *Terminal) (SelectionGestureBehavior, erro
 // Anchor returns the current left-click anchor as an untracked grid reference
 // snapshot. It returns nil when there is no valid active anchor.
 func (g *SelectionGesture) Anchor(t *Terminal) (*GridRef, error) {
-	ref := initCGridRef()
+	var ref C.GhosttyGridRef
 	if err := g.Get(t, SelectionGestureDataAnchor, unsafe.Pointer(&ref)); err != nil {
 		var ge *Error
 		if errors.As(err, &ge) && ge.Result == ResultNoValue {
@@ -783,30 +731,6 @@ func cUint32Slice(codepoints []uint32) (*C.uint32_t, uintptr) {
 	return (*C.uint32_t)(ptr), size
 }
 
-// prepare materializes pointer-valued selection format options in C-owned
-// memory and returns a cleanup function. The C API reads the options only for
-// the duration of a single call, so temporary C memory is enough.
-func (o *selectionFormatOpts) prepare() (func(), error) {
-	if o.selection == nil {
-		return func() {}, nil
-	}
-
-	// GhosttySelection contains pointers through its grid references, so
-	// the memory must start out zeroed. See allocZeroed.
-	size := uintptr(C.sizeof_GhosttySelection)
-	ptr := allocZeroed(size)
-	if ptr == nil {
-		return nil, &Error{Result: ResultOutOfMemory}
-	}
-	csel := (*C.GhosttySelection)(ptr)
-	*csel = o.selection.toC()
-	o.c.selection = csel
-
-	return func() {
-		Free(ptr, size)
-	}, nil
-}
-
 // SelectWord derives a word selection snapshot from a terminal grid reference.
 // The returned selection is not installed as the terminal's active selection.
 // It returns nil when the reference has no selectable word content.
@@ -826,7 +750,7 @@ func (t *Terminal) SelectWord(options SelectWordOptions) (*Selection, error) {
 		opts.boundary_codepoints_len = C.size_t(len(options.BoundaryCodepoints))
 	}
 
-	cs := initCSelection()
+	var cs C.GhosttySelection
 	if err := resultError(C.ghostty_terminal_select_word(t.ptr, &opts, &cs)); err != nil {
 		return noValueNilSelection(err)
 	}
@@ -856,7 +780,7 @@ func (t *Terminal) SelectWordBetween(options SelectWordBetweenOptions) (*Selecti
 		opts.boundary_codepoints_len = C.size_t(len(options.BoundaryCodepoints))
 	}
 
-	cs := initCSelection()
+	var cs C.GhosttySelection
 	if err := resultError(C.ghostty_terminal_select_word_between(t.ptr, &opts, &cs)); err != nil {
 		return noValueNilSelection(err)
 	}
@@ -886,7 +810,7 @@ func (t *Terminal) SelectLine(options SelectLineOptions) (*Selection, error) {
 		opts.whitespace_len = C.size_t(len(options.Whitespace))
 	}
 
-	cs := initCSelection()
+	var cs C.GhosttySelection
 	if err := resultError(C.ghostty_terminal_select_line(t.ptr, &opts, &cs)); err != nil {
 		return noValueNilSelection(err)
 	}
@@ -899,7 +823,7 @@ func (t *Terminal) SelectLine(options SelectLineOptions) (*Selection, error) {
 // content. The returned selection is not installed as the terminal's active
 // selection. It returns nil when no selectable content exists.
 func (t *Terminal) SelectAll() (*Selection, error) {
-	cs := initCSelection()
+	var cs C.GhosttySelection
 	if err := resultError(C.ghostty_terminal_select_all(t.ptr, &cs)); err != nil {
 		return noValueNilSelection(err)
 	}
@@ -913,89 +837,13 @@ func (t *Terminal) SelectAll() (*Selection, error) {
 // active selection. It returns nil when the reference is not selectable
 // command output.
 func (t *Terminal) SelectOutput(options SelectOutputOptions) (*Selection, error) {
-	cs := initCSelection()
+	var cs C.GhosttySelection
 	if err := resultError(C.ghostty_terminal_select_output(t.ptr, options.Ref.ref, &cs)); err != nil {
 		return noValueNilSelection(err)
 	}
 
 	sel := selectionFromC(cs)
 	return &sel, nil
-}
-
-// SelectionFormat formats either the terminal's active selection or the
-// selection supplied with WithSelection into an allocated byte slice. It
-// returns nil when formatting the active selection and no selection is active.
-func (t *Terminal) SelectionFormat(opts ...SelectionFormatOption) ([]byte, error) {
-	fo := selectionFormatOpts{c: C.init_terminal_selection_format_options()}
-	for _, opt := range opts {
-		opt(&fo)
-	}
-	cleanup, err := fo.prepare()
-	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
-
-	var outPtr *C.uint8_t
-	var outLen C.size_t
-	err = resultError(C.ghostty_terminal_selection_format_alloc(t.ptr, nil, fo.c, &outPtr, &outLen))
-	if err != nil {
-		var ge *Error
-		if errors.As(err, &ge) && ge.Result == ResultNoValue {
-			return nil, nil
-		}
-		return nil, err
-	}
-	defer C.ghostty_free(nil, outPtr, outLen)
-
-	if outLen == 0 {
-		return nil, nil
-	}
-	return C.GoBytes(unsafe.Pointer(outPtr), C.int(outLen)), nil
-}
-
-// SelectionFormatString is a convenience wrapper around SelectionFormat that
-// returns the formatted selection as a string.
-func (t *Terminal) SelectionFormatString(opts ...SelectionFormatOption) (string, error) {
-	b, err := t.SelectionFormat(opts...)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
-// SelectionFormatBuf formats either the terminal's active selection or the
-// selection supplied with WithSelection into buf. It returns the number of
-// bytes written. If buf is nil or too small, it returns ResultOutOfSpace and
-// the required size.
-func (t *Terminal) SelectionFormatBuf(buf []byte, opts ...SelectionFormatOption) (int, error) {
-	fo := selectionFormatOpts{c: C.init_terminal_selection_format_options()}
-	for _, opt := range opts {
-		opt(&fo)
-	}
-	cleanup, err := fo.prepare()
-	if err != nil {
-		return 0, err
-	}
-	defer cleanup()
-
-	var ptr *C.uint8_t
-	if len(buf) > 0 {
-		ptr = (*C.uint8_t)(unsafe.Pointer(&buf[0]))
-	}
-
-	var written C.size_t
-	err = resultError(C.ghostty_terminal_selection_format_buf(
-		t.ptr,
-		fo.c,
-		ptr,
-		C.size_t(len(buf)),
-		&written,
-	))
-	if err != nil {
-		return int(written), err
-	}
-	return int(written), nil
 }
 
 // SelectionAdjust mutates a selection snapshot using terminal selection
@@ -1031,7 +879,7 @@ func (t *Terminal) SelectionOrder(sel *Selection) (SelectionOrder, error) {
 // the same as forward ordering.
 func (t *Terminal) SelectionOrdered(sel *Selection, desired SelectionOrder) (*Selection, error) {
 	cs := sel.toC()
-	out := initCSelection()
+	var out C.GhosttySelection
 	if err := resultError(C.ghostty_terminal_selection_ordered(
 		t.ptr,
 		&cs,

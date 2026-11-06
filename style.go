@@ -2,23 +2,10 @@ package libghostty
 
 /*
 #include <ghostty/vt.h>
-
-// Helper to create a properly initialized GhosttyStyle (sized struct).
-static inline GhosttyStyle init_style() {
-	GhosttyStyle style = GHOSTTY_INIT_SIZED(GhosttyStyle);
-	return style;
-}
 */
 import "C"
 
 import "unsafe"
-
-// initCStyle returns a zero-initialized C GhosttyStyle with its size
-// field set (GHOSTTY_INIT_SIZED). Used by other files that need to
-// pass a style to C APIs.
-func initCStyle() C.GhosttyStyle {
-	return C.init_style()
-}
 
 // StyleColorTag identifies the type of color in a style color.
 // C: GhosttyStyleColorTag
@@ -109,49 +96,57 @@ func (s *Style) UnderlineColor() StyleColor {
 	return styleColorFromC(s.c.underline_color)
 }
 
+// hasFlag reports whether the on/off attribute flag is set in the style's
+// packed flags.
+func (s *Style) hasFlag(flag C.GhosttyStyleFlags) bool {
+	return s.c.flags&flag != 0
+}
+
 // Bold reports whether bold is set.
 func (s *Style) Bold() bool {
-	return bool(s.c.bold)
+	return s.hasFlag(C.GHOSTTY_STYLE_FLAG_BOLD)
 }
 
 // Italic reports whether italic is set.
 func (s *Style) Italic() bool {
-	return bool(s.c.italic)
+	return s.hasFlag(C.GHOSTTY_STYLE_FLAG_ITALIC)
 }
 
 // Faint reports whether faint (dim) is set.
 func (s *Style) Faint() bool {
-	return bool(s.c.faint)
+	return s.hasFlag(C.GHOSTTY_STYLE_FLAG_FAINT)
 }
 
 // Blink reports whether blink is set.
 func (s *Style) Blink() bool {
-	return bool(s.c.blink)
+	return s.hasFlag(C.GHOSTTY_STYLE_FLAG_BLINK)
 }
 
 // Inverse reports whether inverse video is set.
 func (s *Style) Inverse() bool {
-	return bool(s.c.inverse)
+	return s.hasFlag(C.GHOSTTY_STYLE_FLAG_INVERSE)
 }
 
 // Invisible reports whether invisible is set.
 func (s *Style) Invisible() bool {
-	return bool(s.c.invisible)
+	return s.hasFlag(C.GHOSTTY_STYLE_FLAG_INVISIBLE)
 }
 
 // Strikethrough reports whether strikethrough is set.
 func (s *Style) Strikethrough() bool {
-	return bool(s.c.strikethrough)
+	return s.hasFlag(C.GHOSTTY_STYLE_FLAG_STRIKETHROUGH)
 }
 
 // Overline reports whether overline is set.
 func (s *Style) Overline() bool {
-	return bool(s.c.overline)
+	return s.hasFlag(C.GHOSTTY_STYLE_FLAG_OVERLINE)
 }
 
 // Underline returns the underline style (one of the Underline* constants).
 func (s *Style) Underline() SGRUnderline {
-	return SGRUnderline(s.c.underline)
+	// GHOSTTY_STYLE_UNDERLINE is a function-like macro, which cgo can't call,
+	// so the masking it does is spelled out here.
+	return SGRUnderline((s.c.flags & C.GHOSTTY_STYLE_UNDERLINE_MASK) >> C.GHOSTTY_STYLE_UNDERLINE_SHIFT)
 }
 
 // styleColorFromC converts a C GhosttyStyleColor to a Go StyleColor.

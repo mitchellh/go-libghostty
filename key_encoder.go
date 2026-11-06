@@ -17,7 +17,7 @@ import "unsafe"
 //
 // Basic usage:
 //  1. Create an encoder with NewKeyEncoder.
-//  2. Configure options with SetOpt* methods or SetOptFromTerminal.
+//  2. Configure options with the Set* methods or SetFromTerminal.
 //  3. Create key events, encode them with Encode, and free them.
 //  4. Free the encoder with Close when done.
 //
@@ -74,8 +74,9 @@ const (
 	OptionAsAltRight OptionAsAlt = C.GHOSTTY_OPTION_AS_ALT_RIGHT
 )
 
-// KeyEncoderOption identifies an encoder configuration option for use
-// with SetOpt.
+// KeyEncoderOption identifies an encoder configuration option. Most take a
+// bool and are set with [KeyEncoder.SetBool]. KeyEncoderOptKittyFlags and
+// KeyEncoderOptMacOSOptionAsAlt have their own setters.
 //
 // C: GhosttyKeyEncoderOption
 type KeyEncoderOption int
@@ -135,38 +136,46 @@ func (enc *KeyEncoder) Close() {
 	enc.ptr = nil
 }
 
-// SetOptBool sets a boolean encoder option. Use this for options
-// that accept a bool value (most encoder options).
-func (enc *KeyEncoder) SetOptBool(opt KeyEncoderOption, val bool) {
+// SetBool sets a boolean encoder option. Use this for options that
+// accept a bool value (most encoder options). It returns an error with
+// result [ResultInvalidValue] for an option that takes another type.
+func (enc *KeyEncoder) SetBool(opt KeyEncoderOption, val bool) error {
+	// libghostty reads the value as the option's own type, and the option-as-alt
+	// enum is wider than a bool. It can't detect the mismatch, so reject it here.
+	switch opt {
+	case KeyEncoderOptKittyFlags, KeyEncoderOptMacOSOptionAsAlt:
+		return &Error{Result: ResultInvalidValue}
+	}
+
 	v := C.bool(val)
-	C.ghostty_key_encoder_setopt(enc.ptr, C.GhosttyKeyEncoderOption(opt), unsafe.Pointer(&v))
+	return resultError(C.ghostty_key_encoder_set(enc.ptr, C.GhosttyKeyEncoderOption(opt), unsafe.Pointer(&v)))
 }
 
-// SetOptKittyFlags sets the Kitty keyboard protocol flags on the
-// encoder.
-func (enc *KeyEncoder) SetOptKittyFlags(flags KittyKeyFlags) {
+// SetKittyFlags sets the Kitty keyboard protocol flags on the encoder.
+func (enc *KeyEncoder) SetKittyFlags(flags KittyKeyFlags) error {
 	v := C.GhosttyKittyKeyFlags(flags)
-	C.ghostty_key_encoder_setopt(enc.ptr, C.GHOSTTY_KEY_ENCODER_OPT_KITTY_FLAGS, unsafe.Pointer(&v))
+	return resultError(C.ghostty_key_encoder_set(enc.ptr, C.GHOSTTY_KEY_ENCODER_OPT_KITTY_FLAGS, unsafe.Pointer(&v)))
 }
 
-// SetOptOptionAsAlt sets the macOS option-as-alt behavior on the
-// encoder.
-func (enc *KeyEncoder) SetOptOptionAsAlt(val OptionAsAlt) {
+// SetOptionAsAlt sets the macOS option-as-alt behavior on the encoder.
+func (enc *KeyEncoder) SetOptionAsAlt(val OptionAsAlt) error {
 	v := C.GhosttyOptionAsAlt(val)
-	C.ghostty_key_encoder_setopt(enc.ptr, C.GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, unsafe.Pointer(&v))
+	return resultError(C.ghostty_key_encoder_set(enc.ptr, C.GHOSTTY_KEY_ENCODER_OPT_MACOS_OPTION_AS_ALT, unsafe.Pointer(&v)))
 }
 
-// SetOptFromTerminal reads the terminal's current modes and flags and
+// SetFromTerminal reads the terminal's current modes and flags and
 // applies them to the encoder's options. This sets cursor key
-// application mode, keypad mode, alt escape prefix, modifyOtherKeys
-// state, and Kitty keyboard protocol flags from the terminal state.
+// application mode, keypad mode, alt escape prefix, backarrow key mode,
+// ignore keypad with numlock, modifyOtherKeys state, and Kitty keyboard
+// protocol flags from the terminal state, replacing any values set
+// earlier.
 //
 // Note that the macOS option-as-alt option cannot be determined from
 // terminal state and is reset to OptionAsAltFalse by this call. Use
-// SetOptOptionAsAlt afterward if needed. The caller must serialize
+// SetOptionAsAlt afterward if needed. The caller must serialize
 // access to both the encoder and the terminal during this call.
-func (enc *KeyEncoder) SetOptFromTerminal(t *Terminal) {
-	C.ghostty_key_encoder_setopt_from_terminal(enc.ptr, t.ptr)
+func (enc *KeyEncoder) SetFromTerminal(t *Terminal) error {
+	return resultError(C.ghostty_key_encoder_set_from_terminal(enc.ptr, t.ptr))
 }
 
 // Encode encodes a key event into a terminal escape sequence and
@@ -181,7 +190,7 @@ func (enc *KeyEncoder) Encode(event *KeyEvent) ([]byte, error) {
 	result := C.ghostty_key_encoder_encode(
 		enc.ptr,
 		event.ptr,
-		(*C.char)(unsafe.Pointer(&buf[0])),
+		(*C.uint8_t)(unsafe.Pointer(&buf[0])),
 		C.size_t(len(buf)),
 		&outLen,
 	)
@@ -202,7 +211,7 @@ func (enc *KeyEncoder) Encode(event *KeyEvent) ([]byte, error) {
 		if err := resultError(C.ghostty_key_encoder_encode(
 			enc.ptr,
 			event.ptr,
-			(*C.char)(unsafe.Pointer(&dynBuf[0])),
+			(*C.uint8_t)(unsafe.Pointer(&dynBuf[0])),
 			outLen,
 			&written,
 		)); err != nil {

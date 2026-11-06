@@ -114,12 +114,24 @@ static inline render_row_text_result render_row_text_append(
 		if (buf.len == 0) {
 			GhosttyCell raw;
 			GhosttyCellWide wide;
-			ghostty_render_state_row_cells_get(
+			result = ghostty_render_state_row_cells_get(
 				cells,
 				GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW,
 				&raw
 			);
-			ghostty_cell_get(raw, GHOSTTY_CELL_DATA_WIDE, &wide);
+			if (result != GHOSTTY_SUCCESS) {
+				out.result = result;
+				return out;
+			}
+
+			// This is part of the optional grid introspection feature, so it
+			// can return GHOSTTY_UNSUPPORTED without writing to wide.
+			result = ghostty_cell_get(raw, GHOSTTY_CELL_DATA_WIDE, &wide);
+			if (result != GHOSTTY_SUCCESS) {
+				out.result = result;
+				return out;
+			}
+
 			if (wide == GHOSTTY_CELL_WIDE_SPACER_TAIL ||
 				wide == GHOSTTY_CELL_WIDE_SPACER_HEAD) {
 				continue;
@@ -359,7 +371,7 @@ func (ri *RenderStateRowIterator) ID() (RenderStateRowID, error) {
 // SetDirty sets the dirty state for the current row.
 func (ri *RenderStateRowIterator) SetDirty(dirty bool) error {
 	v := C.bool(dirty)
-	return resultError(C.ghostty_render_state_row_set(ri.ptr, C.GHOSTTY_RENDER_STATE_ROW_OPTION_DIRTY, unsafe.Pointer(&v)))
+	return resultError(C.ghostty_render_state_row_set(ri.ptr, C.GHOSTTY_RENDER_STATE_ROW_OPT_DIRTY, unsafe.Pointer(&v)))
 }
 
 // Raw returns the raw Row value for the current iterator position.

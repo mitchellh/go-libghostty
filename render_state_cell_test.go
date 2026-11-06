@@ -1,6 +1,9 @@
 package libghostty
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestRenderStateRowCells(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
@@ -627,4 +630,94 @@ func testRenderStateRowCells(t *testing.T, text string) *RenderStateRowCells {
 	}
 
 	return rc
+}
+
+// TestRenderStateRowCellsGraphemesIntoCapacity covers each outcome of filling a
+// GhosttyCodepointBuffer: enough room, no room, and too little room for a
+// multi-codepoint cluster. Going through GhosttyCodepointBuffer is what a raw
+// pointer would corrupt, so the codepoints are checked exactly, along with what
+// happens to the caller's existing elements.
+func TestRenderStateRowCellsGraphemesIntoCapacity(t *testing.T) {
+	// "e" with two combining marks forms one cell of three codepoints.
+	cluster := []uint32{'e', 0x0301, 0x0323}
+	rc := testRenderStateRowCells(t, "ẹ́")
+	if err := rc.Select(0); err != nil {
+		t.Fatal(err)
+	}
+
+	prefix := []uint32{'A', 'B'}
+	want := append(append([]uint32(nil), prefix...), cluster...)
+
+	tests := []struct {
+		name   string
+		extra  int
+		reused bool
+	}{
+		{name: "no spare capacity", extra: 0},
+		{name: "too little capacity", extra: 2},
+		{name: "exact capacity", extra: 3, reused: true},
+		{name: "more than enough capacity", extra: 8, reused: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dst := make([]uint32, len(prefix), len(prefix)+tt.extra)
+			copy(dst, prefix)
+			base := &dst[0]
+
+			got, err := rc.GraphemesInto(dst)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got, want) {
+				t.Fatalf("got %x, want %x", got, want)
+			}
+			if reused := &got[0] == base; reused != tt.reused {
+				t.Fatalf("reused backing array = %v, want %v", reused, tt.reused)
+			}
+		})
+	}
+
+	// A nil slice has no room at all, which still has to size and fill.
+	got, err := rc.GraphemesInto(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, cluster) {
+		t.Fatalf("got %x, want %x", got, cluster)
+	}
+}
+
+// TestRenderStateRowCellsStyleIntoAttributes sets one attribute at a time.
+// StyleInto reads the packed flags in C, so this checks each one against the
+// right bit. A cell with every attribute set can't tell them apart.
+func TestRenderStateRowCellsStyleIntoAttributes(t *testing.T) {
+	tests := []struct {
+		sgr  string
+		want RenderCellStyle
+	}{
+		{"\x1b[1m", RenderCellStyle{Bold: true}},
+		{"\x1b[2m", RenderCellStyle{Faint: true}},
+		{"\x1b[3m", RenderCellStyle{Italic: true}},
+		{"\x1b[4m", RenderCellStyle{Underline: true}},
+		{"\x1b[4:3m", RenderCellStyle{Underline: true}},
+		{"\x1b[7m", RenderCellStyle{Inverse: true}},
+		{"\x1b[9m", RenderCellStyle{Strikethrough: true}},
+	}
+
+	for _, tt := range tests {
+		rc := testRenderStateRowCells(t, tt.sgr+"X")
+		if err := rc.Select(0); err != nil {
+			t.Fatal(err)
+		}
+
+		var got RenderCellStyle
+		if err := rc.StyleInto(&got); err != nil {
+			t.Fatal(err)
+		}
+		want := tt.want
+		want.HasStyling = true
+		if got != want {
+			t.Errorf("%q: got %+v, want %+v", tt.sgr, got, want)
+		}
+	}
 }

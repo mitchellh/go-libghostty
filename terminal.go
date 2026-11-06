@@ -934,9 +934,10 @@ type TerminalUnknownSequence struct {
 // [Terminal.SetUnknownMaxBytes].
 //
 // APC and OSC sequences are currently reported. The callback should check
-// sequence.Tag and ignore tags it does not handle. Cancelled sequences,
-// invalid contents of recognized commands, and disabled known protocols are
-// not reported.
+// sequence.Tag and ignore tags it does not handle. Sequences cut short before
+// their terminator, either cancelled by CAN or SUB or aborted by another 8-bit
+// control byte, invalid contents of recognized commands, and disabled known
+// protocols are not reported.
 //
 // The callback runs during [Terminal.VTWrite]. It may write a reply directly
 // to the pseudoterminal, keeping the reply in order with libghostty's own
@@ -1533,25 +1534,6 @@ const (
 	TerminalCompressionComplete TerminalCompressionResult = C.GHOSTTY_TERMINAL_COMPRESSION_RESULT_COMPLETE
 )
 
-// TerminalCursorStyle identifies the visual style used when DECSCUSR resets
-// the cursor.
-// C: GhosttyTerminalCursorStyle
-type TerminalCursorStyle int
-
-const (
-	// TerminalCursorStyleBar is a vertical bar cursor.
-	TerminalCursorStyleBar TerminalCursorStyle = C.GHOSTTY_TERMINAL_CURSOR_STYLE_BAR
-
-	// TerminalCursorStyleBlock is a filled block cursor.
-	TerminalCursorStyleBlock TerminalCursorStyle = C.GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK
-
-	// TerminalCursorStyleUnderline is an underline cursor.
-	TerminalCursorStyleUnderline TerminalCursorStyle = C.GHOSTTY_TERMINAL_CURSOR_STYLE_UNDERLINE
-
-	// TerminalCursorStyleBlockHollow is a hollow block cursor.
-	TerminalCursorStyleBlockHollow TerminalCursorStyle = C.GHOSTTY_TERMINAL_CURSOR_STYLE_BLOCK_HOLLOW
-)
-
 // CompressionActivity returns the opaque scrollback-compression activity
 // token. Only equality comparisons between tokens are meaningful.
 func (t *Terminal) CompressionActivity() (uint64, error) {
@@ -1682,56 +1664,56 @@ type ScrollViewportTag int
 
 const (
 	// ScrollViewportTop scrolls to the top of scrollback.
-	ScrollViewportTop ScrollViewportTag = C.GHOSTTY_SCROLL_VIEWPORT_TOP
+	ScrollViewportTop ScrollViewportTag = C.GHOSTTY_TERMINAL_SCROLL_VIEWPORT_TOP
 
 	// ScrollViewportBottom scrolls to the bottom (active area).
-	ScrollViewportBottom ScrollViewportTag = C.GHOSTTY_SCROLL_VIEWPORT_BOTTOM
+	ScrollViewportBottom ScrollViewportTag = C.GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM
 
 	// ScrollViewportDelta scrolls by a delta amount (up is negative).
-	ScrollViewportDelta ScrollViewportTag = C.GHOSTTY_SCROLL_VIEWPORT_DELTA
+	ScrollViewportDelta ScrollViewportTag = C.GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA
 
 	// ScrollViewportRow scrolls to an absolute row offset in the same
 	// coordinate space as [Scrollbar.Offset].
-	ScrollViewportRow ScrollViewportTag = C.GHOSTTY_SCROLL_VIEWPORT_ROW
+	ScrollViewportRow ScrollViewportTag = C.GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW
 
 	// ScrollViewportPrompt scrolls by a number of shell prompts instead of
 	// a number of rows (up is negative). See [Terminal.ScrollViewportPrompt].
-	ScrollViewportPrompt ScrollViewportTag = C.GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT
+	ScrollViewportPrompt ScrollViewportTag = C.GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT
 )
 
-// ScrollViewport scrolls the terminal viewport to the top of scrollback.
-func (t *Terminal) ScrollViewportTop() {
+// ScrollViewportTop scrolls the terminal viewport to the top of scrollback.
+func (t *Terminal) ScrollViewportTop() error {
 	var sv C.GhosttyTerminalScrollViewport
-	sv.tag = C.GHOSTTY_SCROLL_VIEWPORT_TOP
-	C.ghostty_terminal_scroll_viewport(t.ptr, sv)
+	sv.tag = C.GHOSTTY_TERMINAL_SCROLL_VIEWPORT_TOP
+	return resultError(C.ghostty_terminal_scroll_viewport(t.ptr, sv))
 }
 
 // ScrollViewportBottom scrolls the terminal viewport to the bottom
 // (active area).
-func (t *Terminal) ScrollViewportBottom() {
+func (t *Terminal) ScrollViewportBottom() error {
 	var sv C.GhosttyTerminalScrollViewport
-	sv.tag = C.GHOSTTY_SCROLL_VIEWPORT_BOTTOM
-	C.ghostty_terminal_scroll_viewport(t.ptr, sv)
+	sv.tag = C.GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM
+	return resultError(C.ghostty_terminal_scroll_viewport(t.ptr, sv))
 }
 
 // ScrollViewportDelta scrolls the terminal viewport by the given delta
 // (negative for up, positive for down).
-func (t *Terminal) ScrollViewportDelta(delta int) {
+func (t *Terminal) ScrollViewportDelta(delta int) error {
 	var sv C.GhosttyTerminalScrollViewport
-	sv.tag = C.GHOSTTY_SCROLL_VIEWPORT_DELTA
+	sv.tag = C.GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA
 	// Set the delta in the value union. The delta field is at offset 0.
 	*(*C.intptr_t)(unsafe.Pointer(&sv.value[0])) = C.intptr_t(delta)
-	C.ghostty_terminal_scroll_viewport(t.ptr, sv)
+	return resultError(C.ghostty_terminal_scroll_viewport(t.ptr, sv))
 }
 
 // ScrollViewportRow scrolls the viewport to an absolute row offset from the
 // top of the scrollable area. The value is clamped to the available range.
-func (t *Terminal) ScrollViewportRow(row uint) {
+func (t *Terminal) ScrollViewportRow(row uint) error {
 	var sv C.GhosttyTerminalScrollViewport
-	sv.tag = C.GHOSTTY_SCROLL_VIEWPORT_ROW
+	sv.tag = C.GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW
 	// Set the row in the value union. The row field is at offset 0.
 	*(*C.size_t)(unsafe.Pointer(&sv.value[0])) = C.size_t(row)
-	C.ghostty_terminal_scroll_viewport(t.ptr, sv)
+	return resultError(C.ghostty_terminal_scroll_viewport(t.ptr, sv))
 }
 
 // ScrollViewportPrompt scrolls the viewport by delta shell prompts and
@@ -1749,13 +1731,13 @@ func (t *Terminal) ScrollViewportRow(row uint) {
 // doesn't move. If there are fewer prompts than requested, the viewport
 // stops at the last one it finds. Moving down past the last prompt can
 // scroll all the way to the bottom of the screen, where new output appears.
-func (t *Terminal) ScrollViewportPrompt(delta int) {
+func (t *Terminal) ScrollViewportPrompt(delta int) error {
 	var sv C.GhosttyTerminalScrollViewport
-	sv.tag = C.GHOSTTY_SCROLL_VIEWPORT_DELTA_PROMPT
+	sv.tag = C.GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT
 	// Set the prompt delta in the value union. The delta_prompt field is
 	// at offset 0.
 	*(*C.intptr_t)(unsafe.Pointer(&sv.value[0])) = C.intptr_t(delta)
-	C.ghostty_terminal_scroll_viewport(t.ptr, sv)
+	return resultError(C.ghostty_terminal_scroll_viewport(t.ptr, sv))
 }
 
 // TerminalBoundary is a point in the VT stream where [Terminal.VTWriteUntil]
@@ -1878,7 +1860,8 @@ const (
 	TerminalStringEndST TerminalStringEnd = C.GHOSTTY_TERMINAL_STRING_END_ST_C1
 
 	// TerminalStringEndCanceled means the string was canceled by CAN (0x18)
-	// or SUB (0x1A). The stream is back at ground.
+	// or SUB (0x1A). The stream is back at ground. The terminal discards a
+	// canceled APC or OSC, so its command does not run.
 	TerminalStringEndCanceled TerminalStringEnd = C.GHOSTTY_TERMINAL_STRING_END_CANCELLED
 
 	// TerminalStringEndAborted means another 8-bit control byte interrupted
@@ -1887,7 +1870,8 @@ const (
 	// [TerminalWriteStop.Reached].
 	//
 	// Like [TerminalStringEndST], this only ends an APC string or a DCS
-	// string that is still in its header.
+	// string that is still in its header. The terminal discards an aborted
+	// APC, just like a canceled one.
 	TerminalStringEndAborted TerminalStringEnd = C.GHOSTTY_TERMINAL_STRING_END_ABORTED
 
 	// TerminalStringEndBEL means the string ended with BEL (0x07). Only OSC
@@ -2081,7 +2065,7 @@ func (t *Terminal) KittyGraphics() (*KittyGraphics, error) {
 // PointTagScreen and PointTagHistory may be expensive for large
 // scrollback buffers.
 func (t *Terminal) GridRef(point Point) (*GridRef, error) {
-	ref := initCGridRef()
+	var ref C.GhosttyGridRef
 	if err := resultError(C.ghostty_terminal_grid_ref(
 		t.ptr,
 		point.toC(),

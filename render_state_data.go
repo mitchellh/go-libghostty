@@ -108,7 +108,7 @@ const (
 	RenderStateDataColorPalette RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_COLOR_PALETTE
 
 	// RenderStateDataCursorVisualStyle is the visual style of the cursor
-	// (GhosttyRenderStateCursorVisualStyle).
+	// (GhosttyCursorStyle).
 	RenderStateDataCursorVisualStyle RenderStateData = C.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE
 
 	// RenderStateDataCursorVisible indicates whether the cursor is visible
@@ -259,7 +259,7 @@ func (rs *RenderState) Cursor() (*RenderStateCursor, error) {
 		Visible:          bool(cc.visible),
 		Blinking:         bool(cc.blinking),
 		PasswordInput:    bool(cc.password_input),
-		VisualStyle:      CursorVisualStyle(cc.visual_style),
+		VisualStyle:      CursorStyle(cc.visual_style),
 	}, nil
 }
 
@@ -342,12 +342,12 @@ func (rs *RenderState) CursorVisible() (bool, error) {
 }
 
 // CursorVisualStyle returns the visual style of the cursor.
-func (rs *RenderState) CursorVisualStyle() (CursorVisualStyle, error) {
-	var v C.GhosttyRenderStateCursorVisualStyle
+func (rs *RenderState) CursorVisualStyle() (CursorStyle, error) {
+	var v C.GhosttyCursorStyle
 	if err := resultError(C.ghostty_render_state_get(rs.ptr, C.GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE, unsafe.Pointer(&v))); err != nil {
 		return 0, err
 	}
-	return CursorVisualStyle(v), nil
+	return CursorStyle(v), nil
 }
 
 // CursorViewportHasValue reports whether the cursor is visible within
@@ -481,7 +481,7 @@ func (rs *RenderState) Rows() (uint16, error) {
 // SetDirty sets the dirty state.
 func (rs *RenderState) SetDirty(dirty RenderStateDirty) error {
 	v := C.GhosttyRenderStateDirty(dirty)
-	return resultError(C.ghostty_render_state_set(rs.ptr, C.GHOSTTY_RENDER_STATE_OPTION_DIRTY, unsafe.Pointer(&v)))
+	return resultError(C.ghostty_render_state_set(rs.ptr, C.GHOSTTY_RENDER_STATE_OPT_DIRTY, unsafe.Pointer(&v)))
 }
 
 // SetOverscan sets the number of extra rows to capture above and below the
@@ -492,10 +492,10 @@ func (rs *RenderState) SetDirty(dirty RenderStateDirty) error {
 // applies the request and marks the entire render state as dirty. Use
 // [RenderState.Overscan] after that update to find how many rows were available.
 //
-// C: GHOSTTY_RENDER_STATE_OPTION_OVERSCAN
+// C: GHOSTTY_RENDER_STATE_OPT_OVERSCAN
 func (rs *RenderState) SetOverscan(request RenderStateOverscan) error {
 	v := C.GhosttyRenderStateOverscan{above: C.uint16_t(request.Above), below: C.uint16_t(request.Below)}
-	return resultError(C.ghostty_render_state_set(rs.ptr, C.GHOSTTY_RENDER_STATE_OPTION_OVERSCAN, unsafe.Pointer(&v)))
+	return resultError(C.ghostty_render_state_set(rs.ptr, C.GHOSTTY_RENDER_STATE_OPT_OVERSCAN, unsafe.Pointer(&v)))
 }
 
 // Overscan returns the number of extra rows captured by the last update.

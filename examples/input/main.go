@@ -4,7 +4,7 @@
 // the windowing system and must translate them into the byte sequences
 // that a program running in the terminal expects to read from the pty.
 // The KeyEncoder and MouseEncoder perform that translation. Both are
-// configured from the terminal's current modes with SetOptFromTerminal,
+// configured from the terminal's current modes with SetFromTerminal,
 // so the encoding automatically follows whatever the running program
 // has requested (application cursor keys, mouse tracking, the Kitty
 // keyboard protocol, and so on).
@@ -86,7 +86,7 @@ func keys(term *ghostty.Terminal) {
 	// same up arrow now encodes as SS3 A.
 	fmt.Println("== keys (after ESC [ ? 1 h, application cursor keys)")
 	term.VTWrite([]byte("\x1b[?1h"))
-	enc.SetOptFromTerminal(term)
+	enc.SetFromTerminal(term)
 	encodeKey(enc, ev, "up")
 
 	// Enable the Kitty keyboard protocol with the "disambiguate" flag
@@ -95,7 +95,7 @@ func keys(term *ghostty.Terminal) {
 	// program can tell it apart from other keys that share the byte.
 	fmt.Println("== keys (after ESC [ > 1 u, Kitty disambiguate)")
 	term.VTWrite([]byte("\x1b[>1u"))
-	enc.SetOptFromTerminal(term)
+	enc.SetFromTerminal(term)
 	ev.SetKey(ghostty.KeyC)
 	ev.SetMods(ghostty.ModCtrl)
 	ev.SetUnshiftedCodepoint('c')
@@ -119,8 +119,8 @@ func mouse(term *ghostty.Terminal) {
 
 	// The encoder converts pixel positions to cells, so it needs to know
 	// the screen and cell geometry. This is host state, not terminal
-	// state, so it is not covered by SetOptFromTerminal.
-	enc.SetOptSize(ghostty.MouseEncoderSize{
+	// state, so it is not covered by SetFromTerminal.
+	enc.SetSize(ghostty.MouseEncoderSize{
 		ScreenWidth:  640,
 		ScreenHeight: 384,
 		CellWidth:    8,
@@ -143,7 +143,7 @@ func mouse(term *ghostty.Terminal) {
 	// no output at all and the host would handle it locally instead
 	// (for example by starting a selection).
 	fmt.Println("== mouse (tracking off)")
-	enc.SetOptFromTerminal(term)
+	enc.SetFromTerminal(term)
 	encodeMouse(enc, ev, "left press")
 
 	// Enable normal mouse tracking (mode 1000) with SGR encoding (mode
@@ -151,7 +151,7 @@ func mouse(term *ghostty.Terminal) {
 	// encoder. The click now encodes as CSI < 0 ; 3 ; 2 M.
 	fmt.Println("== mouse (after ESC [ ? 1000 h and ESC [ ? 1006 h)")
 	term.VTWrite([]byte("\x1b[?1000h\x1b[?1006h"))
-	enc.SetOptFromTerminal(term)
+	enc.SetFromTerminal(term)
 	encodeMouse(enc, ev, "left press")
 
 	// The matching release. SGR format distinguishes releases with a

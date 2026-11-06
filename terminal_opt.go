@@ -245,10 +245,10 @@ func (t *Terminal) SetDefaultCursorBlink(blink *bool) error {
 
 // SetDefaultCursorStyle sets the cursor style selected by DECSCUSR reset.
 // Passing nil restores the built-in block cursor.
-func (t *Terminal) SetDefaultCursorStyle(style *TerminalCursorStyle) error {
+func (t *Terminal) SetDefaultCursorStyle(style *CursorStyle) error {
 	var val unsafe.Pointer
 	if style != nil {
-		v := C.GhosttyTerminalCursorStyle(*style)
+		v := C.GhosttyCursorStyle(*style)
 		val = unsafe.Pointer(&v)
 	}
 	return resultError(C.ghostty_terminal_set(
@@ -315,7 +315,7 @@ func (t *Terminal) SetPwd(pwd string) error {
 func (t *Terminal) SetSelection(sel *Selection) error {
 	var val unsafe.Pointer
 	if sel != nil {
-		cs := initCSelection()
+		var cs C.GhosttySelection
 		cs.start = sel.Start.ref
 		cs.end = sel.End.ref
 		cs.rectangle = C.bool(sel.Rectangle)
@@ -351,7 +351,8 @@ func (t *Terminal) SetKittyClipboardWriteMaxBytes(limit *uint) error {
 // SetKittyImageStorageLimit sets the Kitty image storage limit in bytes.
 // Applied to all initialized screens (primary and alternate). A value of
 // zero disables the Kitty graphics protocol entirely, deleting all stored
-// images and placements. Pass nil to disable (equivalent to zero).
+// images and placements. Pass nil to restore the default of 10 MB
+// (10,000,000 bytes).
 func (t *Terminal) SetKittyImageStorageLimit(limit *uint64) error {
 	var val unsafe.Pointer
 	if limit != nil {
@@ -377,7 +378,13 @@ func (t *Terminal) SetKittyImageMediumFile(enabled bool) error {
 }
 
 // SetKittyImageMediumTempFile enables Kitty image loading via the temporary
-// file medium and restricts it to directory. Passing nil disables the medium.
+// file medium and allows files in directory, in addition to the system
+// temporary directories such as /tmp that libghostty always allows. Passing nil
+// disables the medium.
+//
+// An empty directory does not disable the medium. It stays enabled for the
+// system temporary directories, even though
+// [Terminal.KittyImageMediumTempFile] then reads back as empty.
 func (t *Terminal) SetKittyImageMediumTempFile(directory *string) error {
 	return t.setStringOption(
 		C.GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE,
@@ -432,8 +439,12 @@ func (t *Terminal) SetModeDefault(mode Mode, value bool) error {
 }
 
 // SetScrollbackMaxBytes sets the approximate maximum scrollback allocation
-// in bytes. Passing nil removes the byte limit. Lowering the limit may
-// immediately remove eligible historical pages.
+// in bytes. Lowering the limit may immediately remove eligible historical
+// pages.
+//
+// Pass nil to restore the default limit of 10,000 bytes, which is rounded up
+// to one page in practice because history is kept in whole pages. Pass a
+// pointer to the maximum uint value to remove the limit.
 func (t *Terminal) SetScrollbackMaxBytes(limit *uint) error {
 	var val unsafe.Pointer
 	if limit != nil {

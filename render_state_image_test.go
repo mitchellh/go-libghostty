@@ -251,7 +251,7 @@ func TestRenderStateImageIteratorKittyVirtual(t *testing.T) {
 	if info.Protocol != ImageProtocolKitty {
 		t.Fatalf("expected kitty protocol, got %d", info.Protocol)
 	}
-	if info.Layer != RenderStateImageLayerBelowText {
+	if info.Layer != ImageLayerBelowText {
 		t.Fatalf("expected below-text layer, got %d", info.Layer)
 	}
 	if info.KittyKind != RenderStateKittyPlacementKindVirtual {
@@ -508,7 +508,7 @@ func TestRenderStateImageIteratorKittyFixed(t *testing.T) {
 	}
 
 	// A z-index of 0 draws in front of the text.
-	if info.Z != 0 || info.Layer != RenderStateImageLayerAboveText {
+	if info.Z != 0 || info.Layer != ImageLayerAboveText {
 		t.Fatalf("expected z 0 above text, got %d %d", info.Z, info.Layer)
 	}
 

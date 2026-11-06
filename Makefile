@@ -2,7 +2,7 @@ BUILD_DIR := build
 
 # FetchContent places the ghostty source here.
 GHOSTTY_ZIG_OUT := $(CURDIR)/$(BUILD_DIR)/_deps/ghostty-src/zig-out
-PKG_CONFIG_PATH := $(GHOSTTY_ZIG_OUT)/share/pkgconfig
+PKG_CONFIG_PATH := $(GHOSTTY_ZIG_OUT)/lib/pkgconfig
 DYLD_LIBRARY_PATH := $(GHOSTTY_ZIG_OUT)/lib
 LD_LIBRARY_PATH := $(GHOSTTY_ZIG_OUT)/lib
 
@@ -82,7 +82,7 @@ cross-$(1): $(BUILD_DIR)/.ghostty-built-$(1)
 	CXX="zig c++ -target $$($(1)_ZIG)" \
 	GOOS=$$($(1)_GOOS) \
 	GOARCH=$$($(1)_GOARCH) \
-	PKG_CONFIG_PATH="$(CURDIR)/$(BUILD_DIR)/ghostty-$(1)/share/pkgconfig" \
+	PKG_CONFIG_PATH="$(CURDIR)/$(BUILD_DIR)/ghostty-$(1)/lib/pkgconfig" \
 	CGO_LDFLAGS_ALLOW='.*[.]lib$$$$' \
 	go build . ./sys/...
 endef

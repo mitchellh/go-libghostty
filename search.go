@@ -247,7 +247,7 @@ func (s *Search) SetNeedle(needle []byte) error {
 // the newest match. It returns an error with result [ResultNoValue] when the
 // search has no matches.
 func (s *Search) SelectNext() error {
-	return s.set(C.GHOSTTY_SEARCH_OPT_SELECT_NEXT, nil)
+	return resultError(C.ghostty_search_select_next(s.ptr))
 }
 
 // SelectPrevious first updates the Search from the terminal, then selects the
@@ -255,7 +255,7 @@ func (s *Search) SelectNext() error {
 // back to the oldest match. It returns an error with result [ResultNoValue]
 // when the search has no matches.
 func (s *Search) SelectPrevious() error {
-	return s.set(C.GHOSTTY_SEARCH_OPT_SELECT_PREV, nil)
+	return resultError(C.ghostty_search_select_prev(s.ptr))
 }
 
 // SetScrollPolicy sets how selecting a match affects the terminal viewport.
@@ -325,7 +325,7 @@ func (s *Search) SelectedIndex() (*uint, error) {
 // no match is selected. The next operation that mutates the terminal may
 // invalidate the Selection.
 func (s *Search) SelectedMatch() (*Selection, error) {
-	value := initCSelection()
+	var value C.GhosttySelection
 	err := s.get(SearchDataSelectedMatch, unsafe.Pointer(&value))
 	if err != nil {
 		if isResult(err, ResultNoValue) {

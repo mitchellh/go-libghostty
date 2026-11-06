@@ -6,6 +6,24 @@ import (
 	"unsafe"
 )
 
+// formatSelection returns the text inside sel, formatted with the options a
+// new Formatter starts with.
+func formatSelection(t *testing.T, term *Terminal, sel *Selection) string {
+	t.Helper()
+
+	f, err := NewFormatter(term, WithFormatterSelection(sel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	formatted, err := f.FormatString()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return formatted
+}
+
 func TestTerminalSelectionAPIs(t *testing.T) {
 	term, err := NewTerminal(WithSize(20, 5))
 	if err != nil {
@@ -27,15 +45,18 @@ func TestTerminalSelectionAPIs(t *testing.T) {
 		t.Fatal("expected word selection")
 	}
 
-	formatted, err := term.SelectionFormatString(WithSelection(word))
-	if err != nil {
-		t.Fatal(err)
-	}
+	formatted := formatSelection(t, term, word)
 	if formatted != "hello" {
 		t.Fatalf("expected formatted word %q, got %q", "hello", formatted)
 	}
 
-	required, err := term.SelectionFormatBuf(nil, WithSelection(word))
+	f, err := NewFormatter(term, WithFormatterSelection(word))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	required, err := f.FormatBuf(nil)
 	if err == nil {
 		t.Fatal("expected out-of-space error from size query")
 	}
@@ -48,7 +69,7 @@ func TestTerminalSelectionAPIs(t *testing.T) {
 	}
 
 	buf := make([]byte, required)
-	n, err := term.SelectionFormatBuf(buf, WithSelection(word))
+	n, err := f.FormatBuf(buf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,10 +88,7 @@ func TestTerminalSelectionAPIs(t *testing.T) {
 	if line == nil {
 		t.Fatal("expected line selection")
 	}
-	formatted, err = term.SelectionFormatString(WithSelection(line), WithSelectionTrim(true))
-	if err != nil {
-		t.Fatal(err)
-	}
+	formatted = formatSelection(t, term, line)
 	if formatted != "second" {
 		t.Fatalf("expected formatted line %q, got %q", "second", formatted)
 	}
@@ -141,10 +159,7 @@ func TestTerminalSelectionAPIs(t *testing.T) {
 	if between == nil {
 		t.Fatal("expected word-between selection")
 	}
-	formatted, err = term.SelectionFormatString(WithSelection(between))
-	if err != nil {
-		t.Fatal(err)
-	}
+	formatted = formatSelection(t, term, between)
 	if formatted != "world" {
 		t.Fatalf("expected formatted word-between %q, got %q", "world", formatted)
 	}
@@ -154,10 +169,7 @@ func TestTerminalSelectionAPIs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if output != nil {
-		formatted, err = term.SelectionFormatString(WithSelection(output), WithSelectionTrim(true))
-		if err != nil {
-			t.Fatal(err)
-		}
+		formatted = formatSelection(t, term, output)
 		if formatted == "" {
 			t.Fatal("expected non-empty command-output formatting")
 		}
@@ -171,12 +183,12 @@ func TestTerminalActiveSelectionFormat(t *testing.T) {
 	}
 	defer term.Close()
 
-	formatted, err := term.SelectionFormatString()
+	active, err := term.Selection()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if formatted != "" {
-		t.Fatalf("expected no active selection to format empty string, got %q", formatted)
+	if active != nil {
+		t.Fatalf("expected no active selection, got %+v", active)
 	}
 
 	term.VTWrite([]byte("hello"))
@@ -192,11 +204,14 @@ func TestTerminalActiveSelectionFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	formatted, err = term.SelectionFormatString()
+	active, err = term.Selection()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if formatted != "hello" {
+	if active == nil {
+		t.Fatal("expected active selection")
+	}
+	if formatted := formatSelection(t, term, active); formatted != "hello" {
 		t.Fatalf("expected active selection format %q, got %q", "hello", formatted)
 	}
 }
@@ -217,11 +232,14 @@ func TestTerminalEmptySelectionFormat(t *testing.T) {
 	if err := term.SetSelection(&Selection{Start: *ref, End: *ref}); err != nil {
 		t.Fatal(err)
 	}
-	formatted, err := term.SelectionFormat(WithSelectionTrim(true))
+	active, err := term.Selection()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(formatted) != 0 {
+	if active == nil {
+		t.Fatal("expected active selection")
+	}
+	if formatted := formatSelection(t, term, active); len(formatted) != 0 {
 		t.Fatalf("expected blank selection to format empty output, got %q", formatted)
 	}
 }
@@ -331,10 +349,7 @@ func TestSelectionGestureAPIs(t *testing.T) {
 	if selection == nil {
 		t.Fatal("expected drag selection")
 	}
-	formatted, err := term.SelectionFormatString(WithSelection(selection))
-	if err != nil {
-		t.Fatal(err)
-	}
+	formatted := formatSelection(t, term, selection)
 	if formatted != "hello" {
 		t.Fatalf("expected drag selection %q, got %q", "hello", formatted)
 	}
@@ -412,10 +427,7 @@ func TestSelectionGestureAPIs(t *testing.T) {
 	if selection == nil {
 		t.Fatal("expected deep press selection")
 	}
-	formatted, err = term.SelectionFormatString(WithSelection(selection))
-	if err != nil {
-		t.Fatal(err)
-	}
+	formatted = formatSelection(t, term, selection)
 	if formatted != "world" {
 		t.Fatalf("expected deep press selection %q, got %q", "world", formatted)
 	}

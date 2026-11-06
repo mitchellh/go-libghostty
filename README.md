@@ -66,7 +66,7 @@ library installed. Either install it system-wide or set `PKG_CONFIG_PATH`
 to point to a local checkout:
 
 ```shell
-export PKG_CONFIG_PATH=/path/to/libghostty-vt/share/pkgconfig
+export PKG_CONFIG_PATH=/path/to/libghostty-vt/lib/pkgconfig
 ```
 
 To link dynamically instead (requires the shared library at runtime,

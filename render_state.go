@@ -68,24 +68,6 @@ const (
 	RenderStateDirtyFull RenderStateDirty = C.GHOSTTY_RENDER_STATE_DIRTY_FULL
 )
 
-// CursorVisualStyle describes the visual style of the cursor.
-// C: GhosttyRenderStateCursorVisualStyle
-type CursorVisualStyle int
-
-const (
-	// CursorVisualStyleBar is a bar cursor (DECSCUSR 5, 6).
-	CursorVisualStyleBar CursorVisualStyle = C.GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR
-
-	// CursorVisualStyleBlock is a block cursor (DECSCUSR 1, 2).
-	CursorVisualStyleBlock CursorVisualStyle = C.GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK
-
-	// CursorVisualStyleUnderline is an underline cursor (DECSCUSR 3, 4).
-	CursorVisualStyleUnderline CursorVisualStyle = C.GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE
-
-	// CursorVisualStyleBlockHollow is a hollow block cursor.
-	CursorVisualStyleBlockHollow CursorVisualStyle = C.GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW
-)
-
 // RenderStateCursor holds all cursor information from a render state,
 // retrieved in a single call via the sized-struct API.
 //
@@ -116,7 +98,7 @@ type RenderStateCursor struct {
 	PasswordInput bool
 
 	// VisualStyle is the visual shape of the cursor.
-	VisualStyle CursorVisualStyle
+	VisualStyle CursorStyle
 }
 
 // RenderStateColors holds all color information from a render state,

@@ -26,6 +26,19 @@ func main() {
 	fmt.Printf("Kitty graphics: %s\n", boolStr(info.KittyGraphics))
 	fmt.Printf("Tmux control mode: %s\n", boolStr(info.TmuxControlMode))
 
+	fmt.Printf("Search: %s\n", boolStr(info.FeatureSearch))
+	fmt.Printf("Snapshots: %s\n", boolStr(info.FeatureSnapshot))
+
+	// The headers are fixed when this program is compiled, while the library
+	// can differ when it is linked as a shared library. Until 1.0, the minor
+	// versions must match for the two to be compatible.
+	fmt.Printf("Headers: %s\n", libghostty.HeaderVersion)
+	fmt.Printf("Library: %s\n", libghostty.Version())
+	if info.VersionMajor != libghostty.HeaderVersionMajor ||
+		info.VersionMinor != libghostty.HeaderVersionMinor {
+		log.Fatal("library is not compatible with the headers")
+	}
+
 	fmt.Printf("Version: %s\n", info.VersionString)
 	fmt.Printf("Version major: %d\n", info.VersionMajor)
 	fmt.Printf("Version minor: %d\n", info.VersionMinor)

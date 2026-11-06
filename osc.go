@@ -125,7 +125,10 @@ const (
 	// OSCDataInvalid is an invalid data query.
 	OSCDataInvalid OSCCommandData = C.GHOSTTY_OSC_DATA_INVALID
 
-	// OSCDataChangeWindowTitleString extracts a null-terminated title string.
+	// OSCDataChangeWindowTitleString extracts a window title as a GhosttyString.
+	// The bytes are not null-terminated and belong to the parser, so they remain
+	// valid only until the next operation on it. Use [OSCCommand.WindowTitle] for
+	// a copy.
 	OSCDataChangeWindowTitleString OSCCommandData = C.GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR
 
 	// OSCDataUnknownContent extracts an unknown command's body as a
@@ -229,9 +232,12 @@ func (c OSCCommand) Type() OSCCommandType {
 }
 
 // Data extracts a low-level typed value into out. The pointed-to Go value
-// must match the output type documented for data in osc.h.
-func (c OSCCommand) Data(data OSCCommandData, out unsafe.Pointer) bool {
-	return bool(C.ghostty_osc_command_data(
+// must match the output type documented for data in osc.h. Only a nil error
+// writes to out. An error with result [ResultNoValue] means the command has no
+// data of this kind, for example asking a window title command for unknown
+// content.
+func (c OSCCommand) Data(data OSCCommandData, out unsafe.Pointer) error {
+	return resultError(C.ghostty_osc_command_data(
 		c.ptr,
 		C.GhosttyOscCommandData(data),
 		out,
@@ -241,11 +247,15 @@ func (c OSCCommand) Data(data OSCCommandData, out unsafe.Pointer) bool {
 // WindowTitle returns the title carried by a change-window-title command.
 // The string is copied into Go-owned memory.
 func (c OSCCommand) WindowTitle() (string, bool) {
-	var ptr *C.char
-	if !c.Data(OSCDataChangeWindowTitleString, unsafe.Pointer(&ptr)) {
+	var v C.GhosttyString
+	if c.Data(OSCDataChangeWindowTitleString, unsafe.Pointer(&v)) != nil {
 		return "", false
 	}
-	return C.GoString(ptr), true
+	title, ok := copyGhosttyString(v)
+	if !ok {
+		return "", false
+	}
+	return string(title), true
 }
 
 // SetUnknownMaxBytes sets the maximum number of bytes retained for each OSC
@@ -276,7 +286,7 @@ func (p *OSCParser) SetUnknownMaxBytes(limit uint) error {
 // be represented as a Go byte slice.
 func (c OSCCommand) UnknownContent() (content []byte, ok bool) {
 	var v C.GhosttyString
-	if !c.Data(OSCDataUnknownContent, unsafe.Pointer(&v)) {
+	if c.Data(OSCDataUnknownContent, unsafe.Pointer(&v)) != nil {
 		return nil, false
 	}
 	return copyGhosttyString(v)
@@ -288,8 +298,10 @@ func (c OSCCommand) UnknownContent() (content []byte, ok bool) {
 // The ok result is false if c is not [OSCCommandUnknown].
 func (c OSCCommand) UnknownTruncated() (truncated bool, ok bool) {
 	var v C.bool
-	ok = c.Data(OSCDataUnknownTruncated, unsafe.Pointer(&v))
-	return bool(v), ok
+	if c.Data(OSCDataUnknownTruncated, unsafe.Pointer(&v)) != nil {
+		return false, false
+	}
+	return bool(v), true
 }
 
 // UnknownTerminator returns how an unknown command ended. Use the same
@@ -297,6 +309,8 @@ func (c OSCCommand) UnknownTruncated() (truncated bool, ok bool) {
 // [OSCCommandUnknown].
 func (c OSCCommand) UnknownTerminator() (terminator OSCTerminator, ok bool) {
 	var v C.GhosttyOscTerminator
-	ok = c.Data(OSCDataUnknownTerminator, unsafe.Pointer(&v))
-	return OSCTerminator(v), ok
+	if c.Data(OSCDataUnknownTerminator, unsafe.Pointer(&v)) != nil {
+		return 0, false
+	}
+	return OSCTerminator(v), true
 }

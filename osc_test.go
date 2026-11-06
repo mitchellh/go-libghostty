@@ -1,6 +1,10 @@
 package libghostty
 
-import "testing"
+import (
+	"errors"
+	"testing"
+	"unsafe"
+)
 
 func TestOSCParserWindowTitle(t *testing.T) {
 	parser, err := NewOSCParser()
@@ -155,5 +159,50 @@ func TestOSCParserProgramStatus(t *testing.T) {
 		if got := parser.End('\a').Type(); got != OSCCommandProgramStatus {
 			t.Fatalf("%q: expected program status command, got %d", body, got)
 		}
+	}
+}
+
+// TestOSCCommandWindowTitle reads a title through the GhosttyString output of
+// GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR.
+func TestOSCCommandWindowTitle(t *testing.T) {
+	parser, err := NewOSCParser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parser.Close()
+
+	parse := func(body string) OSCCommand {
+		parser.Reset()
+		for _, b := range []byte(body) {
+			parser.Next(b)
+		}
+		return parser.End('\a')
+	}
+
+	for _, title := range []string{"hello world", "tïtle ✓", "", "nul\x00byte"} {
+		command := parse("2;" + title)
+		if got := command.Type(); got != OSCCommandChangeWindowTitle {
+			t.Fatalf("%q: expected change-window-title, got %d", title, got)
+		}
+		got, ok := command.WindowTitle()
+		if !ok || got != title {
+			t.Fatalf("WindowTitle() = %q, %v; want %q", got, ok, title)
+		}
+	}
+
+	// Another command has no title, which is GHOSTTY_NO_VALUE rather than a
+	// failure of the call itself.
+	command := parse("1;icon")
+	if _, ok := command.WindowTitle(); ok {
+		t.Fatal("expected a non-title command to have no title")
+	}
+	// Test files can't use cgo, so this mirrors the layout of GhosttyString.
+	var title struct {
+		ptr unsafe.Pointer
+		len uintptr
+	}
+	err = command.Data(OSCDataChangeWindowTitleString, unsafe.Pointer(&title))
+	if !errors.Is(err, ErrNoValue) {
+		t.Fatalf("expected no value, got %v", err)
 	}
 }

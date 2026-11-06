@@ -64,6 +64,36 @@ type BuildInfo struct {
 	// VersionBuild is the build metadata string (e.g. commit hash).
 	// Empty if no build metadata is present.
 	VersionBuild string
+
+	// FeatureSnapshot reports whether terminal snapshots are available.
+	FeatureSnapshot bool
+
+	// FeatureFormatter reports whether the formatter is available.
+	FeatureFormatter bool
+
+	// FeatureSelection reports whether selection APIs are available.
+	FeatureSelection bool
+
+	// FeatureSearch reports whether terminal search is available.
+	FeatureSearch bool
+
+	// FeatureRenderState reports whether the render state is available.
+	FeatureRenderState bool
+
+	// FeatureInputEncode reports whether key, mouse, focus, and paste
+	// encoding are available.
+	FeatureInputEncode bool
+
+	// FeatureColor reports whether color utilities are available.
+	FeatureColor bool
+
+	// FeatureGridIntrospection reports whether grid references and the
+	// cell and row accessors are available.
+	FeatureGridIntrospection bool
+
+	// FeatureGlyphProtocol reports whether applications can register
+	// custom glyphs with the Glyph Protocol.
+	FeatureGlyphProtocol bool
 }
 
 // GetBuildInfo queries all compile-time build configuration values
@@ -131,5 +161,48 @@ func GetBuildInfo() (BuildInfo, error) {
 	}
 	info.VersionBuild = C.GoStringN((*C.char)(unsafe.Pointer(verBuild.ptr)), C.int(verBuild.len))
 
+	// Each optional feature has a key that reports whether the library was
+	// built with it. A call into a missing feature returns [ErrUnsupported].
+	features := [...]struct {
+		key C.GhosttyBuildInfo
+		out *bool
+	}{
+		{C.GHOSTTY_BUILD_INFO_FEATURE_SNAPSHOT, &info.FeatureSnapshot},
+		{C.GHOSTTY_BUILD_INFO_FEATURE_FORMATTER, &info.FeatureFormatter},
+		{C.GHOSTTY_BUILD_INFO_FEATURE_SELECTION, &info.FeatureSelection},
+		{C.GHOSTTY_BUILD_INFO_FEATURE_SEARCH, &info.FeatureSearch},
+		{C.GHOSTTY_BUILD_INFO_FEATURE_RENDER_STATE, &info.FeatureRenderState},
+		{C.GHOSTTY_BUILD_INFO_FEATURE_INPUT_ENCODE, &info.FeatureInputEncode},
+		{C.GHOSTTY_BUILD_INFO_FEATURE_COLOR, &info.FeatureColor},
+		{C.GHOSTTY_BUILD_INFO_FEATURE_GRID_INTROSPECTION, &info.FeatureGridIntrospection},
+		{C.GHOSTTY_BUILD_INFO_FEATURE_GLYPH_PROTOCOL, &info.FeatureGlyphProtocol},
+	}
+	for _, feature := range features {
+		// A shared library older than the headers doesn't know a newer key,
+		// which means it doesn't have that feature, so that isn't a failure.
+		var enabled C.bool
+		result := C.ghostty_build_info(feature.key, unsafe.Pointer(&enabled))
+		if result == C.GHOSTTY_UNSUPPORTED {
+			continue
+		}
+		if err := resultError(result); err != nil {
+			return info, err
+		}
+		*feature.out = bool(enabled)
+	}
+
 	return info, nil
+}
+
+// Version returns the full version of the loaded library, such as
+// "0.1.0-dev+9a018f5cc". It is the same text as [BuildInfo.VersionString], but
+// needs no query and cannot fail.
+//
+// Compare it with [HeaderVersion] to see what this package was compiled
+// against. The two can differ when linking the shared library, which is where
+// the check matters: every 0.x release uses the same shared library name, so
+// the system will load a 0.2 library for a program built against 0.1.
+// C: ghostty_version
+func Version() string {
+	return C.GoString(C.ghostty_version())
 }

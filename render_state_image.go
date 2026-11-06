@@ -17,7 +17,7 @@ typedef struct {
 	GhosttyImageProtocol protocol;
 	uint32_t image_id;
 	uint64_t image_generation;
-	GhosttyRenderStateImageLayer layer;
+	GhosttyImageLayer layer;
 	int32_t z;
 	int32_t viewport_col;
 	int32_t viewport_row;
@@ -139,35 +139,6 @@ const (
 	ImageProtocolKitty ImageProtocol = C.GHOSTTY_IMAGE_PROTOCOL_KITTY
 )
 
-// RenderStateImageLayer says whether an image is drawn behind or in front
-// of the terminal's text.
-//
-// Draw a frame from back to front in this order:
-//
-//  1. Images in [RenderStateImageLayerBelowBackground].
-//  2. Cell background colors.
-//  3. Images in [RenderStateImageLayerBelowText].
-//  4. Text.
-//  5. Images in [RenderStateImageLayerAboveText].
-//
-// Within one layer, draw images with a lower z-index first.
-//
-// C: GhosttyRenderStateImageLayer
-type RenderStateImageLayer int
-
-const (
-	// RenderStateImageLayerBelowBackground draws the image behind the cell
-	// background colors.
-	RenderStateImageLayerBelowBackground RenderStateImageLayer = C.GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_BACKGROUND
-
-	// RenderStateImageLayerBelowText draws the image in front of the cell
-	// background colors and behind the text.
-	RenderStateImageLayerBelowText RenderStateImageLayer = C.GHOSTTY_RENDER_STATE_IMAGE_LAYER_BELOW_TEXT
-
-	// RenderStateImageLayerAboveText draws the image in front of the text.
-	RenderStateImageLayerAboveText RenderStateImageLayer = C.GHOSTTY_RENDER_STATE_IMAGE_LAYER_ABOVE_TEXT
-)
-
 // RenderStateKittyPlacementKind describes how a Kitty graphics image in a
 // render state got its position. A renderer can draw every kind the same
 // way. The kind is mostly useful for debugging.
@@ -238,7 +209,7 @@ const (
 	RenderStateImageDataImageGeneration RenderStateImageData = C.GHOSTTY_RENDER_STATE_IMAGE_DATA_IMAGE_GENERATION
 
 	// RenderStateImageDataLayer is the layer to draw the image in
-	// (GhosttyRenderStateImageLayer).
+	// (GhosttyImageLayer).
 	RenderStateImageDataLayer RenderStateImageData = C.GHOSTTY_RENDER_STATE_IMAGE_DATA_LAYER
 
 	// RenderStateImageDataZ is the z-index of the image within its layer
@@ -333,7 +304,7 @@ type RenderStateImageInfo struct {
 	ImageGeneration uint64
 
 	// Layer says whether to draw the image behind or in front of the text.
-	Layer RenderStateImageLayer
+	Layer ImageLayer
 
 	// Z orders images within the same layer. Draw lower values first.
 	// Kitty virtual placements always use -1.
@@ -521,7 +492,7 @@ func (it *RenderStateImageIterator) InfoInto(dst *RenderStateImageInfo) error {
 		Protocol:         ImageProtocol(v.protocol),
 		ImageID:          uint32(v.image_id),
 		ImageGeneration:  uint64(v.image_generation),
-		Layer:            RenderStateImageLayer(v.layer),
+		Layer:            ImageLayer(v.layer),
 		Z:                int32(v.z),
 		ViewportCol:      int32(v.viewport_col),
 		ViewportRow:      int32(v.viewport_row),
@@ -616,12 +587,12 @@ func (it *RenderStateImageIterator) ImageGeneration() (uint64, error) {
 }
 
 // Layer returns the layer to draw the current image in.
-func (it *RenderStateImageIterator) Layer() (RenderStateImageLayer, error) {
-	var v C.GhosttyRenderStateImageLayer
+func (it *RenderStateImageIterator) Layer() (ImageLayer, error) {
+	var v C.GhosttyImageLayer
 	if err := it.get(C.GHOSTTY_RENDER_STATE_IMAGE_DATA_LAYER, unsafe.Pointer(&v)); err != nil {
 		return 0, err
 	}
-	return RenderStateImageLayer(v), nil
+	return ImageLayer(v), nil
 }
 
 // Z returns the z-index of the current image within its layer. Draw lower

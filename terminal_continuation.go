@@ -26,7 +26,9 @@ import (
 //
 // Continuation tracking must have been enabled with
 // [WithContinuationMaxBytes] or [Terminal.SetContinuationMaxBytes] before the
-// input that produced an unfinished state was written.
+// input that produced an unfinished state was written. When tracking is
+// disabled, this returns an error with result [ResultInvalidValue], even at
+// ground.
 // C: ghostty_terminal_continuation_alloc
 func (t *Terminal) Continuation() ([]byte, error) {
 	var outPtr *C.uint8_t
@@ -56,7 +58,10 @@ func (t *Terminal) Continuation() ([]byte, error) {
 
 // ContinuationBuf copies the replay-safe VT continuation into buf and returns
 // the number of bytes written. If buf is nil or too small, the returned count
-// is the required size and the error has result [ResultOutOfSpace].
+// is the required size and the error has result [ResultOutOfSpace]. With
+// tracking enabled, a stream at ground has an empty continuation that needs no
+// space, so this returns 0 and no error, even for a nil buf. When tracking is
+// disabled, this returns an error with result [ResultInvalidValue].
 // C: ghostty_terminal_continuation_buf
 func (t *Terminal) ContinuationBuf(buf []byte) (int, error) {
 	var ptr *C.uint8_t

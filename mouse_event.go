@@ -163,8 +163,8 @@ func (e *MouseEvent) Close() {
 }
 
 // SetAction sets the mouse action (press, release, motion).
-func (e *MouseEvent) SetAction(action MouseAction) {
-	C.ghostty_mouse_event_set_action(e.ptr, C.GhosttyMouseAction(action))
+func (e *MouseEvent) SetAction(action MouseAction) error {
+	return resultError(C.ghostty_mouse_event_set_action(e.ptr, C.GhosttyMouseAction(action)))
 }
 
 // Action returns the mouse action (press, release, motion).
@@ -173,27 +173,29 @@ func (e *MouseEvent) Action() MouseAction {
 }
 
 // SetButton sets the mouse button for the event.
-func (e *MouseEvent) SetButton(button MouseButton) {
-	C.ghostty_mouse_event_set_button(e.ptr, C.GhosttyMouseButton(button))
+func (e *MouseEvent) SetButton(button MouseButton) error {
+	return resultError(C.ghostty_mouse_event_set_button(e.ptr, C.GhosttyMouseButton(button)))
 }
 
 // ClearButton clears the event button, setting it to "none".
 // Use this for motion events with no button pressed.
-func (e *MouseEvent) ClearButton() {
-	C.ghostty_mouse_event_clear_button(e.ptr)
+func (e *MouseEvent) ClearButton() error {
+	return resultError(C.ghostty_mouse_event_clear_button(e.ptr))
 }
 
 // Button returns the mouse button and whether one is set. If no
 // button is set (e.g. a motion-only event), ok is false.
 func (e *MouseEvent) Button() (button MouseButton, ok bool) {
 	var b C.GhosttyMouseButton
-	ok = bool(C.ghostty_mouse_event_get_button(e.ptr, &b))
-	return MouseButton(b), ok
+	if C.ghostty_mouse_event_get_button(e.ptr, &b) != C.GHOSTTY_SUCCESS {
+		return MouseButtonUnknown, false
+	}
+	return MouseButton(b), true
 }
 
 // SetMods sets the keyboard modifiers held during the mouse event.
-func (e *MouseEvent) SetMods(mods Mods) {
-	C.ghostty_mouse_event_set_mods(e.ptr, C.GhosttyMods(mods))
+func (e *MouseEvent) SetMods(mods Mods) error {
+	return resultError(C.ghostty_mouse_event_set_mods(e.ptr, C.GhosttyMods(mods)))
 }
 
 // Mods returns the keyboard modifiers held during the mouse event.
@@ -202,11 +204,11 @@ func (e *MouseEvent) Mods() Mods {
 }
 
 // SetPosition sets the event position in surface-space pixels.
-func (e *MouseEvent) SetPosition(pos MousePosition) {
-	C.ghostty_mouse_event_set_position(e.ptr, C.GhosttyMousePosition{
+func (e *MouseEvent) SetPosition(pos MousePosition) error {
+	return resultError(C.ghostty_mouse_event_set_position(e.ptr, C.GhosttyMousePosition{
 		x: C.float(pos.X),
 		y: C.float(pos.Y),
-	})
+	}))
 }
 
 // Position returns the event position in surface-space pixels.

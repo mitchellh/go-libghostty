@@ -24,15 +24,15 @@ func resolveColor(sc libghostty.StyleColor, colors *libghostty.RenderStateColors
 }
 
 // cursorStyleName returns a human-readable name for a cursor visual style.
-func cursorStyleName(s libghostty.CursorVisualStyle) string {
+func cursorStyleName(s libghostty.CursorStyle) string {
 	switch s {
-	case libghostty.CursorVisualStyleBar:
+	case libghostty.CursorStyleBar:
 		return "bar"
-	case libghostty.CursorVisualStyleBlock:
+	case libghostty.CursorStyleBlock:
 		return "block"
-	case libghostty.CursorVisualStyleUnderline:
+	case libghostty.CursorStyleUnderline:
 		return "underline"
-	case libghostty.CursorVisualStyleBlockHollow:
+	case libghostty.CursorStyleBlockHollow:
 		return "block_hollow"
 	default:
 		return "unknown"

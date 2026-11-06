@@ -466,6 +466,26 @@ func TestSnapshotKittyImages(t *testing.T) {
 	if pending == 0 {
 		t.Fatal("expected pending pixel bytes at READY")
 	}
+
+	// Metadata is available before the pixels arrive. Info reports that as
+	// pending rather than failing, while Pixels returns no value.
+	pendingImage := firstKittyImage(t, restored)
+	info, err := pendingImage.Info()
+	if err != nil {
+		t.Fatalf("Info on pending image: %v", err)
+	}
+	if !info.PixelsPending || info.Pixels != nil {
+		t.Fatalf("expected pending pixels, got %+v", info)
+	}
+	if info.Width != 1 || info.Height != 1 {
+		t.Fatalf("expected 1x1 pending image, got %dx%d", info.Width, info.Height)
+	}
+	if uint64(info.ExpectedLen) != pending {
+		t.Fatalf("expected %d expected bytes, got %d", pending, info.ExpectedLen)
+	}
+	_, err = pendingImage.Pixels()
+	assertResultError(t, err, ResultNoValue)
+
 	_, err = decoder.KittyImageCount(TerminalScreen(99))
 	assertResultError(t, err, ResultInvalidValue)
 	_, err = decoder.KittyImagePendingBytes(TerminalScreen(99))
@@ -532,12 +552,21 @@ func TestSnapshotKittyImages(t *testing.T) {
 		if img == nil {
 			t.Fatalf("expected restored image %d", progress.ImageID)
 		}
-		data, err := img.Data()
+		data, err := img.Pixels()
 		if err != nil {
 			t.Fatal(err)
 		}
 		if uint(len(data)) != progress.ImageBytes {
 			t.Fatalf("expected %d pixel bytes on image, got %d", progress.ImageBytes, len(data))
+		}
+
+		// Info now sees the same pixels and no longer reports them pending.
+		info, err := img.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.PixelsPending || string(info.Pixels) != string(data) {
+			t.Fatalf("expected completed pixels, got %+v", info)
 		}
 	}
 	if imageRecords != 1 {
@@ -546,6 +575,36 @@ func TestSnapshotKittyImages(t *testing.T) {
 	if received != pending {
 		t.Fatalf("expected %d pixel bytes received, got %d", pending, received)
 	}
+}
+
+// firstKittyImage returns the image behind term's first placement.
+func firstKittyImage(t *testing.T, term *Terminal) *KittyGraphicsImage {
+	t.Helper()
+
+	kg, err := term.KittyGraphics()
+	if err != nil {
+		t.Fatal(err)
+	}
+	iter, err := NewKittyGraphicsPlacementIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer iter.Close()
+	if err := kg.PlacementIterator(iter); err != nil {
+		t.Fatal(err)
+	}
+	if !iter.Next() {
+		t.Fatal("expected a placement")
+	}
+	id, err := iter.ImageID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := kg.Image(id)
+	if img == nil {
+		t.Fatalf("expected image %d", id)
+	}
+	return img
 }
 
 func TestSnapshotDecodeCompressesHistory(t *testing.T) {

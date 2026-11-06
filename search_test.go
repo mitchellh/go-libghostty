@@ -1,6 +1,7 @@
 package libghostty
 
 import (
+	"errors"
 	"testing"
 	"unsafe"
 )
@@ -229,5 +230,28 @@ func TestSearchTickAfterTerminalClose(t *testing.T) {
 		t.Fatal("expected a closed-terminal error")
 	} else if e, ok := err.(*Error); !ok || e.Result != ResultInvalidValue {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestSearchSelectNoMatches checks that selecting with nothing to select is
+// [ErrNoValue], which is how a find bar knows not to highlight anything.
+func TestSearchSelectNoMatches(t *testing.T) {
+	term, err := NewTerminal(WithSize(20, 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	search, err := NewSearch(term)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer search.Close()
+
+	if err := search.SelectNext(); !errors.Is(err, ErrNoValue) {
+		t.Fatalf("SelectNext: expected no value, got %v", err)
+	}
+	if err := search.SelectPrevious(); !errors.Is(err, ErrNoValue) {
+		t.Fatalf("SelectPrevious: expected no value, got %v", err)
 	}
 }

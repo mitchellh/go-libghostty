@@ -334,7 +334,7 @@ func (t *Terminal) CursorPendingWrap() (bool, error) {
 // CursorStyle returns the current SGR style of the cursor. This is
 // the style that will be applied to newly printed characters.
 func (t *Terminal) CursorStyle() (*Style, error) {
-	cs := initCStyle()
+	var cs C.GhosttyStyle
 	if err := resultError(C.ghostty_terminal_get(t.ptr, C.GHOSTTY_TERMINAL_DATA_CURSOR_STYLE, unsafe.Pointer(&cs))); err != nil {
 		return nil, err
 	}
@@ -570,7 +570,7 @@ func (t *Terminal) Rows() (uint16, error) {
 // internals. Any later mutating terminal operation may invalidate them, so
 // callers should read and cache needed data immediately.
 func (t *Terminal) Selection() (*Selection, error) {
-	cs := initCSelection()
+	var cs C.GhosttySelection
 	err := resultError(C.ghostty_terminal_get(t.ptr,
 		C.GHOSTTY_TERMINAL_DATA_SELECTION,
 		unsafe.Pointer(&cs),

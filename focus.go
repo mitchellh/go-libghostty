@@ -91,7 +91,7 @@ func FocusEncode(event FocusEvent) ([]byte, error) {
 	var outLen C.size_t
 	result := C.ghostty_focus_encode(
 		C.GhosttyFocusEvent(event),
-		(*C.char)(unsafe.Pointer(&buf[0])),
+		(*C.uint8_t)(unsafe.Pointer(&buf[0])),
 		C.size_t(len(buf)),
 		&outLen,
 	)
@@ -110,7 +110,7 @@ func FocusEncode(event FocusEvent) ([]byte, error) {
 		var written C.size_t
 		if err := resultError(C.ghostty_focus_encode(
 			C.GhosttyFocusEvent(event),
-			(*C.char)(unsafe.Pointer(&dynBuf[0])),
+			(*C.uint8_t)(unsafe.Pointer(&dynBuf[0])),
 			outLen,
 			&written,
 		)); err != nil {

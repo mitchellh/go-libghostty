@@ -5,14 +5,6 @@ package libghostty
 #include "go_io.h"
 #include <string.h>
 
-// Helper to create a properly initialized GhosttyFormatterTerminalOptions (sized struct).
-static inline GhosttyFormatterTerminalOptions init_formatter_terminal_options() {
-	GhosttyFormatterTerminalOptions opts = GHOSTTY_INIT_SIZED(GhosttyFormatterTerminalOptions);
-	opts.extra.size = sizeof(GhosttyFormatterTerminalExtra);
-	opts.extra.screen.size = sizeof(GhosttyFormatterScreenExtra);
-	return opts;
-}
-
 // Buffer small formatter writes before forwarding them to Go. Styled output
 // can contain hundreds of small writes, and crossing into Go for each one is
 // expensive. The buffer is flushed when full and when formatting completes;
@@ -114,176 +106,127 @@ const (
 	FormatterFormatHTML FormatterFormat = C.GHOSTTY_FORMATTER_FORMAT_HTML
 )
 
-// formatterOpts wraps the C options struct so that functional options
-// can mutate it directly. Only fields explicitly set by an option are
-// modified; everything else retains the GHOSTTY_INIT_SIZED defaults.
-type formatterOpts struct {
-	c         C.GhosttyFormatterTerminalOptions
-	selection *Selection
-}
+// FormatterExtras selects terminal state to add to VT output. Combine values
+// with |.
+//
+// VT output is meant to be written to another terminal to recreate the screen.
+// Without extras, it reproduces the text and how each cell is styled. Each
+// extra adds sequences that restore one more piece of terminal state, such as
+// the cursor position or the colors in the palette. Plain text ignores extras.
+//
+// [FormatterFormatHTML] uses only [FormatterExtraPalette], which adds the
+// <style> block defining the --vt-palette-N CSS variables. Palette colors in
+// HTML output refer to those variables, so without this extra the document has
+// to define them itself.
+//
+// A new formatter uses [FormatterExtrasDefault]. Use [FormatterExtrasAll] to
+// recreate the terminal as closely as possible.
+//
+// C: GhosttyFormatterExtras
+type FormatterExtras uint32
 
-// FormatterOption is a functional option for configuring a Formatter.
-type FormatterOption func(*formatterOpts)
+const (
+	// FormatterExtraPalette restores the color palette with OSC 4.
+	FormatterExtraPalette FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_PALETTE
+
+	// FormatterExtraModes restores terminal modes that differ from their
+	// defaults with CSI h and l.
+	FormatterExtraModes FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_MODES
+
+	// FormatterExtraScrollingRegion restores the scrolling region with DECSTBM
+	// and DECSLRM.
+	FormatterExtraScrollingRegion FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_SCROLLING_REGION
+
+	// FormatterExtraTabstops restores tab stops by clearing them all and
+	// setting each one again.
+	FormatterExtraTabstops FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_TABSTOPS
+
+	// FormatterExtraPwd restores the working directory with OSC 7.
+	FormatterExtraPwd FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_PWD
+
+	// FormatterExtraKeyboard restores keyboard modes such as modifyOtherKeys.
+	FormatterExtraKeyboard FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_KEYBOARD
+
+	// FormatterExtraCursor restores the cursor position with CUP.
+	FormatterExtraCursor FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_CURSOR
+
+	// FormatterExtraStyle restores the style the cursor writes new text with,
+	// using SGR.
+	FormatterExtraStyle FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_STYLE
+
+	// FormatterExtraHyperlink restores the hyperlink the cursor writes new text
+	// with, using OSC 8.
+	FormatterExtraHyperlink FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_HYPERLINK
+
+	// FormatterExtraProtection restores character protection with DECSCA.
+	FormatterExtraProtection FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_PROTECTION
+
+	// FormatterExtraKittyKeyboard restores the Kitty keyboard protocol flags.
+	FormatterExtraKittyKeyboard FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_KITTY_KEYBOARD
+
+	// FormatterExtraCharsets restores the character sets, such as the line
+	// drawing set.
+	FormatterExtraCharsets FormatterExtras = C.GHOSTTY_FORMATTER_EXTRA_CHARSETS
+
+	// FormatterExtrasNone selects no extras. VT output has only the text and
+	// its styles.
+	FormatterExtrasNone FormatterExtras = C.GHOSTTY_FORMATTER_EXTRAS_NONE
+
+	// FormatterExtrasAll selects every extra.
+	FormatterExtrasAll FormatterExtras = C.GHOSTTY_FORMATTER_EXTRAS_ALL
+
+	// FormatterExtrasDefault is what a new formatter starts with: the palette,
+	// the cursor style and the cursor hyperlink. These are the extras that
+	// affect how output looks.
+	FormatterExtrasDefault FormatterExtras = C.GHOSTTY_FORMATTER_EXTRAS_DEFAULT
+)
+
+// FormatterOption is a functional option for configuring a Formatter. Each one
+// applies a setting to the new formatter, so anything an option does can also
+// be done later with the corresponding Formatter setter.
+type FormatterOption func(*Formatter) error
 
 // WithFormatterFormat sets the output format (plain, VT, or HTML).
-// Defaults to FormatterFormatPlain if not specified.
-func WithFormatterFormat(f FormatterFormat) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.emit = C.GhosttyFormatterFormat(f)
+// Defaults to FormatterFormatPlain if not specified. See [Formatter.SetEmit].
+func WithFormatterFormat(format FormatterFormat) FormatterOption {
+	return func(f *Formatter) error {
+		return f.SetEmit(format)
 	}
 }
 
-// WithFormatterUnwrap enables unwrapping of soft-wrapped lines.
+// WithFormatterUnwrap enables unwrapping of soft-wrapped lines. Defaults to
+// false. See [Formatter.SetUnwrap].
 func WithFormatterUnwrap(unwrap bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.unwrap = C.bool(unwrap)
+	return func(f *Formatter) error {
+		return f.SetUnwrap(unwrap)
 	}
 }
 
 // WithFormatterTrim controls whether trailing whitespace is removed from
-// lines that contain text.
-//
-// Blank lines at the end of the output are always removed. The one
-// exception is [FormatterFormatVT] output with trim set to false, which
-// keeps those lines so that the output reproduces the screen layout.
+// lines that contain text. Defaults to true. See [Formatter.SetTrim].
 func WithFormatterTrim(trim bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.trim = C.bool(trim)
+	return func(f *Formatter) error {
+		return f.SetTrim(trim)
 	}
 }
 
 // WithFormatterSelection restricts formatter output to sel. Passing nil
-// formats the entire active screen.
-//
-// The selection must come from the same terminal passed to [NewFormatter] and
-// must still be valid when NewFormatter is called. NewFormatter copies the
-// selection immediately, so the Selection value itself does not need to
-// outlive that call. The copied selection still contains borrowed grid
-// references into the terminal; as with every [Selection], later terminal
-// mutations may invalidate those references.
+// formats the entire active screen, which is the default. See
+// [Formatter.SetSelection].
 func WithFormatterSelection(sel *Selection) FormatterOption {
-	return func(o *formatterOpts) {
-		o.selection = sel
+	return func(f *Formatter) error {
+		return f.SetSelection(sel)
 	}
 }
 
-// WithFormatterExtraPalette emits the palette using OSC 4 sequences.
-func WithFormatterExtraPalette(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.palette = C.bool(v)
+// WithFormatterExtras sets the terminal state added to VT output. Defaults to
+// [FormatterExtrasDefault]. Set this to [FormatterExtrasNone] for just the text
+// and its styles, since the default adds the whole palette to VT and HTML
+// output. See [Formatter.SetExtras].
+func WithFormatterExtras(extras FormatterExtras) FormatterOption {
+	return func(f *Formatter) error {
+		return f.SetExtras(extras)
 	}
-}
-
-// WithFormatterExtraModes emits terminal modes that differ from their
-// defaults using CSI h/l.
-func WithFormatterExtraModes(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.modes = C.bool(v)
-	}
-}
-
-// WithFormatterExtraScrollingRegion emits scrolling region state using
-// DECSTBM and DECSLRM sequences.
-func WithFormatterExtraScrollingRegion(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.scrolling_region = C.bool(v)
-	}
-}
-
-// WithFormatterExtraTabstops emits tabstop positions by clearing all
-// tabs and setting each one.
-func WithFormatterExtraTabstops(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.tabstops = C.bool(v)
-	}
-}
-
-// WithFormatterExtraPwd emits the present working directory using OSC 7.
-func WithFormatterExtraPwd(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.pwd = C.bool(v)
-	}
-}
-
-// WithFormatterExtraKeyboard emits keyboard modes such as
-// ModifyOtherKeys.
-func WithFormatterExtraKeyboard(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.keyboard = C.bool(v)
-	}
-}
-
-// WithFormatterExtraCursor emits cursor position using CUP (CSI H).
-func WithFormatterExtraCursor(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.screen.cursor = C.bool(v)
-	}
-}
-
-// WithFormatterExtraStyle emits current SGR style state based on the
-// cursor's active style_id.
-func WithFormatterExtraStyle(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.screen.style = C.bool(v)
-	}
-}
-
-// WithFormatterExtraHyperlink emits current hyperlink state using
-// OSC 8 sequences.
-func WithFormatterExtraHyperlink(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.screen.hyperlink = C.bool(v)
-	}
-}
-
-// WithFormatterExtraProtection emits character protection mode using
-// DECSCA.
-func WithFormatterExtraProtection(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.screen.protection = C.bool(v)
-	}
-}
-
-// WithFormatterExtraKittyKeyboard emits Kitty keyboard protocol state
-// using CSI > u and CSI = sequences.
-func WithFormatterExtraKittyKeyboard(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.screen.kitty_keyboard = C.bool(v)
-	}
-}
-
-// WithFormatterExtraCharsets emits character set designations and
-// invocations.
-func WithFormatterExtraCharsets(v bool) FormatterOption {
-	return func(o *formatterOpts) {
-		o.c.extra.screen.charsets = C.bool(v)
-	}
-}
-
-// prepare materializes the selection option in C-owned memory for the
-// formatter constructor. libghostty copies the selection into the formatter
-// during ghostty_formatter_terminal_new, so this allocation only needs to
-// remain alive for that call. Using C-owned memory also avoids placing a Go
-// pointer inside the C options struct passed through cgo.
-func (o *formatterOpts) prepare() (func(), error) {
-	if o.selection == nil {
-		return func() {}, nil
-	}
-
-	// GhosttySelection contains pointers through its grid references, so
-	// the memory must start out zeroed. See allocZeroed.
-	size := uintptr(C.sizeof_GhosttySelection)
-	ptr := allocZeroed(size)
-	if ptr == nil {
-		return nil, &Error{Result: ResultOutOfMemory}
-	}
-	csel := (*C.GhosttySelection)(ptr)
-	*csel = o.selection.toC()
-	o.c.selection = csel
-
-	return func() {
-		Free(ptr, size)
-	}, nil
 }
 
 // Formatter wraps a Ghostty formatter handle that can produce
@@ -307,25 +250,138 @@ type Formatter struct {
 // borrowed reference to the terminal and reads its current state on
 // each [Formatter.Format] call, so formatter calls must be serialized
 // with other access to the terminal.
+//
+// Without options, the formatter emits plain text with trailing whitespace
+// trimmed. Settings can be changed at any time with the Formatter setters and
+// stay in effect across format calls.
 func NewFormatter(t *Terminal, opts ...FormatterOption) (*Formatter, error) {
-	// Start with GHOSTTY_INIT_SIZED defaults; options only touch
-	// fields the caller explicitly sets.
-	fo := formatterOpts{c: C.init_formatter_terminal_options()}
-	for _, opt := range opts {
-		opt(&fo)
-	}
-	cleanup, err := fo.prepare()
-	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
-
 	var ptr C.GhosttyFormatter
-	if err := resultError(C.ghostty_formatter_terminal_new(nil, &ptr, t.ptr, fo.c)); err != nil {
+	if err := resultError(C.ghostty_formatter_terminal_new(nil, &ptr, t.ptr)); err != nil {
 		return nil, err
 	}
 
-	return &Formatter{ptr: ptr}, nil
+	f := &Formatter{ptr: ptr}
+	for _, opt := range opts {
+		if err := opt(f); err != nil {
+			f.Close()
+			return nil, err
+		}
+	}
+
+	return f, nil
+}
+
+// set writes one formatter option. A nil value restores the option's default.
+func (f *Formatter) set(option C.GhosttyFormatterOption, value unsafe.Pointer) error {
+	return resultError(C.ghostty_formatter_set(f.ptr, option, value))
+}
+
+// get reads one formatter option.
+func (f *Formatter) get(option C.GhosttyFormatterOption, out unsafe.Pointer) error {
+	return resultError(C.ghostty_formatter_get(f.ptr, option, out))
+}
+
+// SetEmit sets the output format. The change applies to the next format call.
+func (f *Formatter) SetEmit(format FormatterFormat) error {
+	v := C.GhosttyFormatterFormat(format)
+	return f.set(C.GHOSTTY_FORMATTER_OPT_EMIT, unsafe.Pointer(&v))
+}
+
+// Emit returns the output format.
+func (f *Formatter) Emit() (FormatterFormat, error) {
+	var v C.GhosttyFormatterFormat
+	if err := f.get(C.GHOSTTY_FORMATTER_OPT_EMIT, unsafe.Pointer(&v)); err != nil {
+		return 0, err
+	}
+	return FormatterFormat(v), nil
+}
+
+// SetUnwrap controls whether lines that wrapped because they were too long for
+// the screen are joined. When false, each row of the screen is its own line in
+// the output. When true, a line the terminal wrapped onto several rows comes
+// out as one line, the way the program originally wrote it.
+func (f *Formatter) SetUnwrap(unwrap bool) error {
+	v := C.bool(unwrap)
+	return f.set(C.GHOSTTY_FORMATTER_OPT_UNWRAP, unsafe.Pointer(&v))
+}
+
+// Unwrap reports whether soft-wrapped lines are joined.
+func (f *Formatter) Unwrap() (bool, error) {
+	var v C.bool
+	if err := f.get(C.GHOSTTY_FORMATTER_OPT_UNWRAP, unsafe.Pointer(&v)); err != nil {
+		return false, err
+	}
+	return bool(v), nil
+}
+
+// SetTrim controls whether trailing whitespace is removed from lines that
+// contain text.
+//
+// Blank lines at the end of the output are always removed. The one exception
+// is [FormatterFormatVT] output with trim set to false, which keeps those lines
+// so that the output reproduces the screen layout.
+func (f *Formatter) SetTrim(trim bool) error {
+	v := C.bool(trim)
+	return f.set(C.GHOSTTY_FORMATTER_OPT_TRIM, unsafe.Pointer(&v))
+}
+
+// Trim reports whether trailing whitespace is removed.
+func (f *Formatter) Trim() (bool, error) {
+	var v C.bool
+	if err := f.get(C.GHOSTTY_FORMATTER_OPT_TRIM, unsafe.Pointer(&v)); err != nil {
+		return false, err
+	}
+	return bool(v), nil
+}
+
+// SetSelection restricts formatter output to sel. Passing nil clears it and
+// formats the entire active screen again.
+//
+// To format the terminal's active selection, read it with [Terminal.Selection]
+// and pass it here. Check for nil first: Terminal.Selection returns nil when
+// nothing is selected, which here would format the whole screen. For the same
+// text Ghostty copies to the clipboard, use plain output with both unwrap and
+// trim enabled.
+//
+// The selection must come from the same terminal passed to [NewFormatter]. The
+// formatter copies it, so the Selection value itself does not need to outlive
+// this call. The copy still contains borrowed grid references into the
+// terminal, and like any [Selection] it is only valid until the terminal next
+// changes. After that, set the selection again before formatting, or clear it.
+func (f *Formatter) SetSelection(sel *Selection) error {
+	if sel == nil {
+		return f.set(C.GHOSTTY_FORMATTER_OPT_SELECTION, nil)
+	}
+	cs := sel.toC()
+	return f.set(C.GHOSTTY_FORMATTER_OPT_SELECTION, unsafe.Pointer(&cs))
+}
+
+// Selection returns the selection the formatter is restricted to, or nil when
+// it formats the entire active screen. The result is subject to the same
+// validity rules as the value passed to [Formatter.SetSelection].
+func (f *Formatter) Selection() (*Selection, error) {
+	var cs C.GhosttySelection
+	if err := f.get(C.GHOSTTY_FORMATTER_OPT_SELECTION, unsafe.Pointer(&cs)); err != nil {
+		return noValueNilSelection(err)
+	}
+	sel := selectionFromC(cs)
+	return &sel, nil
+}
+
+// SetExtras sets the terminal state added to VT output. To change one extra and
+// keep the rest, read the current value with [Formatter.Extras] first.
+func (f *Formatter) SetExtras(extras FormatterExtras) error {
+	v := C.GhosttyFormatterExtras(extras)
+	return f.set(C.GHOSTTY_FORMATTER_OPT_EXTRAS, unsafe.Pointer(&v))
+}
+
+// Extras returns the terminal state added to VT output.
+func (f *Formatter) Extras() (FormatterExtras, error) {
+	var v C.GhosttyFormatterExtras
+	if err := f.get(C.GHOSTTY_FORMATTER_OPT_EXTRAS, unsafe.Pointer(&v)); err != nil {
+		return 0, err
+	}
+	return FormatterExtras(v), nil
 }
 
 // Close frees the formatter handle. After this call, the formatter
@@ -358,7 +414,8 @@ func (f *Formatter) Format() ([]byte, error) {
 // FormatBuf formats into buf and returns the number of bytes written. If buf
 // is too small, the returned count is the required size and the error has
 // result [ResultOutOfSpace]. A nil buffer can be used to query the required
-// size.
+// size. Output that is empty needs no space, so a query for it returns 0 and
+// no error.
 func (f *Formatter) FormatBuf(buf []byte) (int, error) {
 	var ptr *C.uint8_t
 	if len(buf) > 0 {

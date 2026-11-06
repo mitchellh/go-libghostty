@@ -74,7 +74,9 @@ type Paste struct {
 
 // Paste applies the terminal's current paste modes and writes either encoded
 // text or a Kitty clipboard paste event through the terminal's write-pty
-// callback. The returned boolean reports whether anything was written.
+// callback. The returned boolean reports whether anything was written. Paste
+// returns an error matching [ResultInvalidValue] if the terminal has no
+// write-pty callback.
 //
 // Paste refuses text that could run commands without the user meaning to.
 // Normally that is text with a newline or carriage return, because the shell
@@ -196,7 +198,7 @@ func pasteEncodeInto(
 		(*C.char)(unsafe.Pointer(&data[0])),
 		C.size_t(len(data)),
 		C.bool(bracketed),
-		(*C.char)(unsafe.Pointer(&buf[0])),
+		(*C.uint8_t)(unsafe.Pointer(&buf[0])),
 		C.size_t(len(buf)),
 		&written,
 	)

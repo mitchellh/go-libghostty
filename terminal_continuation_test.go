@@ -184,3 +184,23 @@ func TestTerminalContinuationSetAndComplete(t *testing.T) {
 	_, err = term.ContinuationWriteTo(io.Discard)
 	assertResultError(t, err, ResultInvalidValue)
 }
+
+// TestTerminalContinuationBufAtGround checks a size query with nothing pending.
+// The continuation is empty and needs no space, so there is no out-of-space
+// error to handle.
+func TestTerminalContinuationBufAtGround(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24), WithContinuationMaxBytes(64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	term.VTWrite([]byte("complete"))
+	n, err := term.ContinuationBuf(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("expected empty continuation, got %d bytes", n)
+	}
+}

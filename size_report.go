@@ -59,8 +59,8 @@ func SizeReportEncode(style SizeReportStyle, size SizeReportSize) ([]byte, error
 	var written C.size_t
 	result := C.ghostty_size_report_encode(
 		C.GhosttySizeReportStyle(style),
-		csize,
-		(*C.char)(unsafe.Pointer(&buf[0])),
+		&csize,
+		(*C.uint8_t)(unsafe.Pointer(&buf[0])),
 		C.size_t(len(buf)),
 		&written,
 	)
@@ -75,8 +75,8 @@ func SizeReportEncode(style SizeReportStyle, size SizeReportSize) ([]byte, error
 	var outWritten C.size_t
 	if err := resultError(C.ghostty_size_report_encode(
 		C.GhosttySizeReportStyle(style),
-		csize,
-		(*C.char)(unsafe.Pointer(&out[0])),
+		&csize,
+		(*C.uint8_t)(unsafe.Pointer(&out[0])),
 		C.size_t(len(out)),
 		&outWritten,
 	)); err != nil {

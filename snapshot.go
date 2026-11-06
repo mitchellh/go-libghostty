@@ -617,7 +617,7 @@ func (d *SnapshotDecoder) SetKittyImageStorageLimit(limit uint64) error {
 // record at a time with [SnapshotDecoder.Next].
 //
 // Ready restores Kitty graphics images without their pixel data. You can
-// place and inspect these images right away, but [KittyGraphicsImage.Data]
+// place and inspect these images right away, but [KittyGraphicsImage.Pixels]
 // has nothing to return until Next delivers the pixels. When the pixels
 // arrive, [KittyGraphics.Generation] changes, so a renderer that watches it
 // draws the image on its next frame.

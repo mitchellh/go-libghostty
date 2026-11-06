@@ -18,6 +18,7 @@ func TestErrorMessage(t *testing.T) {
 		{ResultIOError, "ghostty: I/O error"},
 		{ResultLimitExceeded, "ghostty: limit exceeded"},
 		{ResultRejected, "ghostty: rejected"},
+		{ResultUnsupported, "ghostty: unsupported"},
 		{Result(9999), "ghostty: result=9999"},
 	}
 
@@ -65,6 +66,7 @@ func TestErrorIsSentinel(t *testing.T) {
 		{ResultIOError, ErrIO},
 		{ResultLimitExceeded, ErrLimitExceeded},
 		{ResultRejected, ErrRejected},
+		{ResultUnsupported, ErrUnsupported},
 	}
 
 	for _, tt := range tests {

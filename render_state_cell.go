@@ -50,7 +50,7 @@ static inline render_cell_style_snapshot_result render_cell_style_snapshot_get(
 	}
 
 	if (out.style.has_styling) {
-		GhosttyStyle style = GHOSTTY_INIT_SIZED(GhosttyStyle);
+		GhosttyStyle style = {0};
 		result = ghostty_render_state_row_cells_get(
 			cells,
 			GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE,
@@ -61,12 +61,12 @@ static inline render_cell_style_snapshot_result render_cell_style_snapshot_get(
 			return out;
 		}
 
-		out.style.bold = style.bold;
-		out.style.faint = style.faint;
-		out.style.italic = style.italic;
-		out.style.underline = style.underline != GHOSTTY_SGR_UNDERLINE_NONE;
-		out.style.strikethrough = style.strikethrough;
-		out.style.inverse = style.inverse;
+		out.style.bold = (style.flags & GHOSTTY_STYLE_FLAG_BOLD) != 0;
+		out.style.faint = (style.flags & GHOSTTY_STYLE_FLAG_FAINT) != 0;
+		out.style.italic = (style.flags & GHOSTTY_STYLE_FLAG_ITALIC) != 0;
+		out.style.underline = GHOSTTY_STYLE_UNDERLINE(style) != GHOSTTY_SGR_UNDERLINE_NONE;
+		out.style.strikethrough = (style.flags & GHOSTTY_STYLE_FLAG_STRIKETHROUGH) != 0;
+		out.style.inverse = (style.flags & GHOSTTY_STYLE_FLAG_INVERSE) != 0;
 	}
 
 	result = ghostty_render_state_row_cells_get(
@@ -96,6 +96,38 @@ static inline render_cell_style_snapshot_result render_cell_style_snapshot_get(
 	return out;
 }
 
+// render_cell_graphemes_result is returned by value for the same reason as
+// render_cell_graphemes_utf8_result below. GhosttyCodepointBuffer holds a
+// pointer to the caller's buffer, and that buffer is Go memory. cgo refuses a
+// Go struct that holds a Go pointer, so the descriptor has to live here on the
+// C stack. It also reports the total count, so one call both sizes and fills
+// the common case of a cluster that fits.
+typedef struct {
+	GhosttyResult result;
+	size_t len;
+} render_cell_graphemes_result;
+
+static inline render_cell_graphemes_result render_cell_graphemes_append(
+	GhosttyRenderStateRowCells cells,
+	uint32_t* dst,
+	size_t dst_len
+) {
+	GhosttyCodepointBuffer buf = {
+		.ptr = dst,
+		.cap = dst_len,
+		.len = 0,
+	};
+	GhosttyResult result = ghostty_render_state_row_cells_get(
+		cells,
+		GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF,
+		&buf
+	);
+	return (render_cell_graphemes_result) {
+		.result = result,
+		.len = buf.len,
+	};
+}
+
 // render_cell_graphemes_utf8_result is returned by value so the Go binding
 // doesn't need to pass a Go GhosttyBuffer out-parameter through cgo for the hot
 // per-cell text path. The upstream getter owns the grapheme extraction and UTF-8
@@ -116,12 +148,13 @@ static inline render_cell_graphemes_utf8_result render_cell_graphemes_utf8_appen
 		.cap = dst_len,
 		.len = 0,
 	};
+	GhosttyResult result = ghostty_render_state_row_cells_get(
+		cells,
+		GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8,
+		&buf
+	);
 	return (render_cell_graphemes_utf8_result) {
-		.result = ghostty_render_state_row_cells_get(
-			cells,
-			GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_UTF8,
-			&buf
-		),
+		.result = result,
 		.len = buf.len,
 	};
 }
@@ -152,10 +185,6 @@ const (
 	// RenderStateRowCellsDataGraphemesLen is the total number of grapheme
 	// codepoints including the base codepoint (uint32_t).
 	RenderStateRowCellsDataGraphemesLen RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN
-
-	// RenderStateRowCellsDataGraphemesBuf writes grapheme codepoints into
-	// a caller-provided buffer (uint32_t*).
-	RenderStateRowCellsDataGraphemesBuf RenderStateRowCellsData = C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF
 
 	// RenderStateRowCellsDataBgColor is the resolved background color of
 	// the cell (GhosttyColorRgb).
@@ -333,7 +362,7 @@ func (rc *RenderStateRowCells) Raw() (*Cell, error) {
 
 // Style returns the style for the current cell.
 func (rc *RenderStateRowCells) Style() (*Style, error) {
-	cs := initCStyle()
+	var cs C.GhosttyStyle
 	if err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, unsafe.Pointer(&cs))); err != nil {
 		return nil, err
 	}
@@ -393,29 +422,32 @@ func (rc *RenderStateRowCells) Graphemes() ([]uint32, error) {
 // This is the allocation-reusing form of [RenderStateRowCells.Graphemes].
 // Callers that want a per-cell scratch buffer should pass scratch[:0].
 func (rc *RenderStateRowCells) GraphemesInto(dst []uint32) ([]uint32, error) {
-	// Get the number of codepoints.
-	var n C.uint32_t
-	if err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN, unsafe.Pointer(&n))); err != nil {
-		return dst, err
+	// Write into whatever spare capacity dst already has. A cell usually holds
+	// one codepoint, so a reused buffer finishes here in a single cgo call. The
+	// result reports the total count either way, which sizes the retry below.
+	oldLen := len(dst)
+	available := cap(dst) - oldLen
+	var ptr *C.uint32_t
+	if available > 0 {
+		ptr = (*C.uint32_t)(unsafe.Pointer(&dst[:cap(dst)][oldLen]))
 	}
-	if n == 0 {
-		return dst, nil
+	result := C.render_cell_graphemes_append(rc.ptr, ptr, C.size_t(available))
+	if result.result == C.GHOSTTY_SUCCESS {
+		return dst[:oldLen+int(result.len)], nil
+	}
+	if result.result != C.GHOSTTY_OUT_OF_SPACE {
+		return dst, resultError(result.result)
 	}
 
-	// Read codepoints into the newly appended portion of the caller's buffer.
-	oldLen := len(dst)
-	newLen := oldLen + int(n)
-	if newLen <= cap(dst) {
-		dst = dst[:newLen]
-	} else {
-		grown := make([]uint32, newLen)
-		copy(grown, dst)
-		dst = grown
+	// The cluster didn't fit, so grow to the size just reported and read again.
+	grown := make([]uint32, oldLen, oldLen+int(result.len))
+	copy(grown, dst)
+	ptr = (*C.uint32_t)(unsafe.Pointer(&grown[:cap(grown)][oldLen]))
+	result = C.render_cell_graphemes_append(rc.ptr, ptr, C.size_t(cap(grown)-oldLen))
+	if err := resultError(result.result); err != nil {
+		return dst, err
 	}
-	if err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, unsafe.Pointer(&dst[oldLen]))); err != nil {
-		return dst[:oldLen], err
-	}
-	return dst, nil
+	return grown[:oldLen+int(result.len)], nil
 }
 
 // AppendGraphemes appends the current cell's grapheme cluster encoded as

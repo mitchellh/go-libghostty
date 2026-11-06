@@ -213,7 +213,7 @@ func (p *SGRParser) Next() (SGRAttribute, bool) {
 	}
 
 	attr := SGRAttribute{
-		Tag: SGRAttributeTag(C.ghostty_sgr_attribute_tag(raw)),
+		Tag: SGRAttributeTag(C.ghostty_sgr_attribute_tag(&raw)),
 	}
 	value := C.ghostty_sgr_attribute_value(&raw)
 

@@ -2,6 +2,7 @@ package libghostty
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
@@ -95,9 +96,21 @@ func TestKittyGraphicsStorageLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Disable by passing nil.
+	if got, err := term.KittyImageStorageLimit(); err != nil {
+		t.Fatal(err)
+	} else if got != limit {
+		t.Fatalf("expected limit %d, got %d", limit, got)
+	}
+
+	// Nil restores the default rather than disabling the protocol. Only an
+	// explicit zero does that.
 	if err := term.SetKittyImageStorageLimit(nil); err != nil {
 		t.Fatal(err)
+	}
+	if got, err := term.KittyImageStorageLimit(); err != nil {
+		t.Fatal(err)
+	} else if got != 10_000_000 {
+		t.Fatalf("expected default limit 10000000, got %d", got)
 	}
 }
 
@@ -262,7 +275,7 @@ func TestKittyGraphicsImageSendAndLookup(t *testing.T) {
 	}
 
 	// Check data is accessible.
-	data, err := img.Data()
+	data, err := img.Pixels()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,21 +422,21 @@ func TestKittyGraphicsImageInfo(t *testing.T) {
 	if info.Compression != KittyImageCompressionNone {
 		t.Fatalf("expected no compression, got %d", info.Compression)
 	}
-	if info.DataLen != 4 {
-		t.Fatalf("expected data length 4, got %d", info.DataLen)
+	if info.ExpectedLen != 4 {
+		t.Fatalf("expected data length 4, got %d", info.ExpectedLen)
 	}
-	if info.DataPending {
+	if info.PixelsPending {
 		t.Fatal("expected completed image data")
 	}
-	if len(info.Data) != 4 {
-		t.Fatalf("expected 4 bytes of pixel data, got %d", len(info.Data))
+	if len(info.Pixels) != 4 {
+		t.Fatalf("expected 4 bytes of pixel data, got %d", len(info.Pixels))
 	}
-	dataLen, err := img.DataLen()
+	dataLen, err := img.ExpectedLen()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dataLen != info.DataLen {
-		t.Fatalf("DataLen returned %d, Info returned %d", dataLen, info.DataLen)
+	if dataLen != info.ExpectedLen {
+		t.Fatalf("ExpectedLen returned %d, Info returned %d", dataLen, info.ExpectedLen)
 	}
 }
 
@@ -578,7 +591,7 @@ func TestKittyGraphicsPlacementLayerFilter(t *testing.T) {
 	}
 
 	// Set layer filter to ABOVE_TEXT (default z=0 should match).
-	if err := iter.SetLayer(KittyPlacementLayerAboveText); err != nil {
+	if err := iter.SetLayers(ImageLayerMaskAboveText); err != nil {
 		t.Fatal(err)
 	}
 
@@ -677,7 +690,7 @@ func TestKittyGraphicsAdvanceAnimations(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		data, err := img.Data()
+		data, err := img.Pixels()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -742,5 +755,53 @@ func TestKittyGraphicsAdvanceAnimations(t *testing.T) {
 	}
 	if got := snapshot(); got != s2 {
 		t.Fatalf("call after stop changed image: %+v -> %+v", s2, got)
+	}
+}
+
+// TestKittyGraphicsPlacementIteratorLayers checks the layer filter as a mask.
+// The placement has z=0, which is ImageLayerAboveText.
+func TestKittyGraphicsPlacementIteratorLayers(t *testing.T) {
+	term := newKittyTerminal(t)
+	defer term.Close()
+	sendKittyImage(t, term)
+
+	kg, err := term.KittyGraphics()
+	if err != nil {
+		t.Fatal(err)
+	}
+	iter, err := NewKittyGraphicsPlacementIterator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer iter.Close()
+
+	tests := []struct {
+		mask ImageLayerMask
+		want bool
+	}{
+		{0, true},
+		{ImageLayerMaskAll, true},
+		{ImageLayerMaskAll &^ ImageLayerMaskAboveText, false},
+		{ImageLayerMaskAboveText, true},
+		{ImageLayerMaskBelowText, false},
+		{ImageLayerMaskBelowBackground, false},
+		{ImageLayerMaskBelowBackground | ImageLayerMaskBelowText, false},
+		{ImageLayerMaskBelowText | ImageLayerMaskAboveText, true},
+	}
+	for _, tt := range tests {
+		if err := kg.PlacementIterator(iter); err != nil {
+			t.Fatal(err)
+		}
+		if err := iter.SetLayers(tt.mask); err != nil {
+			t.Fatal(err)
+		}
+		if got := iter.Next(); got != tt.want {
+			t.Errorf("mask %#x: Next() = %v, want %v", tt.mask, got, tt.want)
+		}
+	}
+
+	// A bit that matches no layer is rejected.
+	if err := iter.SetLayers(1 << 3); !errors.Is(err, ErrInvalidValue) {
+		t.Fatalf("expected invalid value, got %v", err)
 	}
 }

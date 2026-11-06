@@ -193,7 +193,7 @@ func ModeReportEncode(mode Mode, state ModeReportState) ([]byte, error) {
 	result := C.ghostty_mode_report_encode(
 		C.GhosttyMode(mode),
 		C.GhosttyModeReportState(state),
-		(*C.char)(unsafe.Pointer(&buf[0])),
+		(*C.uint8_t)(unsafe.Pointer(&buf[0])),
 		C.size_t(len(buf)),
 		&written,
 	)
@@ -209,7 +209,7 @@ func ModeReportEncode(mode Mode, state ModeReportState) ([]byte, error) {
 	if err := resultError(C.ghostty_mode_report_encode(
 		C.GhosttyMode(mode),
 		C.GhosttyModeReportState(state),
-		(*C.char)(unsafe.Pointer(&out[0])),
+		(*C.uint8_t)(unsafe.Pointer(&out[0])),
 		C.size_t(len(out)),
 		&outWritten,
 	)); err != nil {

@@ -304,11 +304,7 @@ func goBellTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer) {
 func goClipboardWriteTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer, write *C.GhosttyClipboardWrite) {
 	t := terminalFromUserdata(userdata)
 
-	// GhosttyClipboardWrite is a sized struct so newer libghostty versions
-	// can extend it without breaking existing callbacks. Only read the fields
-	// this binding knows about when the descriptor contains the full current
-	// layout.
-	if write == nil || write.size < C.size_t(C.sizeof_GhosttyClipboardWrite) {
+	if write == nil {
 		return
 	}
 	if t.onClipboardWrite == nil {
@@ -352,10 +348,9 @@ func replyClipboardWrite(write *C.GhosttyClipboardWrite, reply ClipboardWriteRep
 func goClipboardReadTrampoline(_ C.GhosttyTerminal, userdata unsafe.Pointer, read *C.GhosttyClipboardRead) {
 	t := terminalFromUserdata(userdata)
 
-	// A short descriptor does not safely expose the reply function pointer, so
-	// returning without a reply deliberately selects libghostty's denied
-	// fallback.
-	if read == nil || read.size < C.size_t(C.sizeof_GhosttyClipboardRead) {
+	// Without a descriptor there is no reply function pointer, so returning
+	// without a reply deliberately selects libghostty's denied fallback.
+	if read == nil {
 		return
 	}
 	if t.onClipboardRead == nil {
@@ -540,12 +535,7 @@ func goDesktopNotificationTrampoline(
 		return
 	}
 
-	// GhosttyTerminalDesktopNotification is a sized struct so newer
-	// libghostty versions can extend it without breaking existing callbacks.
-	// Ignore descriptors that do not contain the full layout this binding
-	// knows how to read.
-	if notification == nil ||
-		notification.size < C.size_t(C.sizeof_GhosttyTerminalDesktopNotification) {
+	if notification == nil {
 		return
 	}
 
@@ -591,10 +581,7 @@ func goProgressReportTrampoline(
 		return
 	}
 
-	// GhosttyTerminalProgressReport is also a sized struct. Only read the
-	// fields when the caller supplied the complete layout known here.
-	if report == nil ||
-		report.size < C.size_t(C.sizeof_GhosttyTerminalProgressReport) {
+	if report == nil {
 		return
 	}
 
@@ -615,10 +602,7 @@ func goProgramStatusTrampoline(
 		return
 	}
 
-	// GhosttyTerminalProgramStatus is a sized struct. Only read the fields
-	// when the caller supplied the complete layout known here.
-	if report == nil ||
-		report.size < C.size_t(C.sizeof_GhosttyTerminalProgramStatus) {
+	if report == nil {
 		return
 	}
 
@@ -712,10 +696,7 @@ func goSemanticPromptTrampoline(
 		return
 	}
 
-	// GhosttyTerminalSemanticPrompt is a sized struct. Only read the fields
-	// when libghostty supplied at least the layout this binding knows.
-	if event == nil ||
-		event.size < C.size_t(C.sizeof_GhosttyTerminalSemanticPrompt) {
+	if event == nil {
 		return
 	}
 

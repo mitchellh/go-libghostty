@@ -7,12 +7,6 @@ package libghostty
 /*
 #include <ghostty/vt.h>
 
-// Helper to create a properly initialized GhosttySelection (sized struct).
-static inline GhosttySelection init_selection() {
-	GhosttySelection s = GHOSTTY_INIT_SIZED(GhosttySelection);
-	return s;
-}
-
 // Helper to create a properly initialized GhosttyKittyGraphicsPlacementRenderInfo (sized struct).
 static inline GhosttyKittyGraphicsPlacementRenderInfo init_kitty_placement_render_info() {
 	GhosttyKittyGraphicsPlacementRenderInfo info = GHOSTTY_INIT_SIZED(GhosttyKittyGraphicsPlacementRenderInfo);
@@ -27,13 +21,6 @@ import (
 	"time"
 	"unsafe"
 )
-
-// initCSelection returns a zero-initialized C GhosttySelection with its
-// size field set (GHOSTTY_INIT_SIZED). Used by terminal selection APIs
-// that need to pass a sized selection struct to C.
-func initCSelection() C.GhosttySelection {
-	return C.init_selection()
-}
 
 // KittyGraphicsData identifies a storage-level Kitty graphics query.
 // C: GhosttyKittyGraphicsData
@@ -57,39 +44,41 @@ type KittyGraphicsImageData int
 
 const (
 	// KittyGraphicsImageDataInvalid is an invalid / sentinel value.
-	KittyGraphicsImageDataInvalid KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_INVALID
+	KittyGraphicsImageDataInvalid KittyGraphicsImageData = C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_INVALID
 
 	// KittyGraphicsImageDataID is the image ID (uint32_t).
-	KittyGraphicsImageDataID KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_ID
+	KittyGraphicsImageDataID KittyGraphicsImageData = C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_ID
 
 	// KittyGraphicsImageDataNumber is the image number (uint32_t).
-	KittyGraphicsImageDataNumber KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_NUMBER
+	KittyGraphicsImageDataNumber KittyGraphicsImageData = C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_NUMBER
 
 	// KittyGraphicsImageDataWidth is the image width in pixels (uint32_t).
-	KittyGraphicsImageDataWidth KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_WIDTH
+	KittyGraphicsImageDataWidth KittyGraphicsImageData = C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_WIDTH
 
 	// KittyGraphicsImageDataHeight is the image height in pixels (uint32_t).
-	KittyGraphicsImageDataHeight KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_HEIGHT
+	KittyGraphicsImageDataHeight KittyGraphicsImageData = C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_HEIGHT
 
 	// KittyGraphicsImageDataFormat is the pixel format of the image
 	// (GhosttyKittyImageFormat).
-	KittyGraphicsImageDataFormat KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_FORMAT
+	KittyGraphicsImageDataFormat KittyGraphicsImageData = C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_FORMAT
 
 	// KittyGraphicsImageDataCompression is the compression of the image
 	// (GhosttyKittyImageCompression).
-	KittyGraphicsImageDataCompression KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_COMPRESSION
+	KittyGraphicsImageDataCompression KittyGraphicsImageData = C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_COMPRESSION
 
-	// KittyGraphicsImageDataDataPtr is a borrowed pointer to the raw pixel
-	// data for the current animation frame (const uint8_t **).
-	KittyGraphicsImageDataDataPtr KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR
+	// KittyGraphicsImageDataPixels is the image's pixel data (GhosttyString).
+	// The string points into memory owned by the terminal and stays valid until
+	// the terminal is next modified. It returns [ResultNoValue] if the image's
+	// pixels have not arrived yet. Prefer [KittyGraphicsImage.Pixels].
+	KittyGraphicsImageDataPixels KittyGraphicsImageData = C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_PIXELS
 
-	// KittyGraphicsImageDataDataLen is the length of the raw pixel data
-	// in bytes (size_t).
-	KittyGraphicsImageDataDataLen KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN
+	// KittyGraphicsImageDataExpectedLen is the size of the image's pixel data
+	// in bytes (size_t). It is available even before the pixels arrive.
+	KittyGraphicsImageDataExpectedLen KittyGraphicsImageData = C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_EXPECTED_LEN
 
 	// KittyGraphicsImageDataGeneration is the image's content generation
 	// stamp (uint64_t).
-	KittyGraphicsImageDataGeneration KittyGraphicsImageData = C.GHOSTTY_KITTY_IMAGE_DATA_GENERATION
+	KittyGraphicsImageDataGeneration KittyGraphicsImageData = C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_GENERATION
 )
 
 // KittyGraphicsPlacementData identifies a data field for Kitty graphics
@@ -191,35 +180,6 @@ type KittyGraphicsPlacementIterator struct {
 	ptr C.GhosttyKittyGraphicsPlacementIterator
 }
 
-// KittyPlacementLayer selects which placements a
-// [KittyGraphicsPlacementIterator] returns. Set it with
-// [KittyGraphicsPlacementIterator.SetLayer]. The Kitty graphics protocol
-// assigns each placement a layer based on its z-index, as described on
-// each value below.
-//
-// This filter only applies to the storage iterator. When drawing, use
-// [RenderStateImageInfo.Layer] instead. It follows the same rules and
-// also covers virtual placements.
-//
-// C: GhosttyKittyPlacementLayer
-type KittyPlacementLayer int
-
-const (
-	// KittyPlacementLayerAll disables layer filtering (all placements).
-	KittyPlacementLayerAll KittyPlacementLayer = C.GHOSTTY_KITTY_PLACEMENT_LAYER_ALL
-
-	// KittyPlacementLayerBelowBG matches placements below cell background
-	// (z < INT32_MIN/2).
-	KittyPlacementLayerBelowBG KittyPlacementLayer = C.GHOSTTY_KITTY_PLACEMENT_LAYER_BELOW_BG
-
-	// KittyPlacementLayerBelowText matches placements above background but
-	// below text (INT32_MIN/2 <= z < 0).
-	KittyPlacementLayerBelowText KittyPlacementLayer = C.GHOSTTY_KITTY_PLACEMENT_LAYER_BELOW_TEXT
-
-	// KittyPlacementLayerAboveText matches placements above text (z >= 0).
-	KittyPlacementLayerAboveText KittyPlacementLayer = C.GHOSTTY_KITTY_PLACEMENT_LAYER_ABOVE_TEXT
-)
-
 // KittyImageFormat describes the pixel format of a Kitty graphics image.
 //
 // C: GhosttyKittyImageFormat
@@ -308,17 +268,18 @@ type KittyGraphicsImageInfo struct {
 	// changes when an animated image advances to another frame.
 	Generation uint64
 
-	// DataLen is the decoded pixel payload length in bytes. For a pending
-	// image, this is the expected length reserved against the storage limit.
-	DataLen uint
+	// ExpectedLen is the size of the image's pixel data in bytes. It is
+	// available even before the pixels arrive, in which case the image already
+	// counts this many bytes against the storage limit.
+	ExpectedLen uint
 
-	// DataPending reports that metadata is resident but the pixel payload has
-	// not completed yet. Data is nil while this is true.
-	DataPending bool
+	// PixelsPending reports that metadata is resident but the pixels have not
+	// arrived yet. Pixels is nil while this is true.
+	PixelsPending bool
 
-	// Data is a borrowed slice of the raw pixel data. Only valid
-	// until the next mutating terminal call.
-	Data []byte
+	// Pixels is a borrowed slice of the raw pixel data. Only valid until the
+	// next mutating terminal call.
+	Pixels []byte
 }
 
 // KittyGraphicsPlacementInfo contains all placement metadata in a single
@@ -465,8 +426,8 @@ func (kg *KittyGraphics) Generation() (uint64, error) {
 // AdvanceAnimations again from that redraw. Don't schedule redraws
 // closer together than the display's refresh interval, which is about
 // 8 milliseconds at 120 Hz. If ok is false, nothing is playing and
-// there is nothing to schedule. ok is always false if libghostty was
-// built without Kitty graphics support.
+// there is nothing to schedule. If libghostty was built without Kitty
+// graphics support, this returns an error with result [ResultUnsupported].
 //
 // There is no need to watch for animations starting. A program starts an
 // animation by writing to the terminal, and the redraw that follows that
@@ -476,7 +437,7 @@ func (kg *KittyGraphics) Generation() (uint64, error) {
 // arrive late, playback slows down rather than skipping frames.
 //
 // When an image moves to a new frame, its [KittyGraphicsImage.Generation]
-// changes and [KittyGraphicsImage.Data] returns the pixels of the new
+// changes and [KittyGraphicsImage.Pixels] returns the pixels of the new
 // frame. A renderer that already caches textures by generation shows new
 // frames with no extra work.
 //
@@ -527,7 +488,7 @@ func (img *KittyGraphicsImage) ID() (uint32, error) {
 	var v C.uint32_t
 	if err := resultError(C.ghostty_kitty_graphics_image_get(
 		img.ptr,
-		C.GHOSTTY_KITTY_IMAGE_DATA_ID,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_ID,
 		unsafe.Pointer(&v),
 	)); err != nil {
 		return 0, err
@@ -540,7 +501,7 @@ func (img *KittyGraphicsImage) Number() (uint32, error) {
 	var v C.uint32_t
 	if err := resultError(C.ghostty_kitty_graphics_image_get(
 		img.ptr,
-		C.GHOSTTY_KITTY_IMAGE_DATA_NUMBER,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_NUMBER,
 		unsafe.Pointer(&v),
 	)); err != nil {
 		return 0, err
@@ -553,7 +514,7 @@ func (img *KittyGraphicsImage) Width() (uint32, error) {
 	var v C.uint32_t
 	if err := resultError(C.ghostty_kitty_graphics_image_get(
 		img.ptr,
-		C.GHOSTTY_KITTY_IMAGE_DATA_WIDTH,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_WIDTH,
 		unsafe.Pointer(&v),
 	)); err != nil {
 		return 0, err
@@ -566,7 +527,7 @@ func (img *KittyGraphicsImage) Height() (uint32, error) {
 	var v C.uint32_t
 	if err := resultError(C.ghostty_kitty_graphics_image_get(
 		img.ptr,
-		C.GHOSTTY_KITTY_IMAGE_DATA_HEIGHT,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_HEIGHT,
 		unsafe.Pointer(&v),
 	)); err != nil {
 		return 0, err
@@ -629,7 +590,7 @@ func (img *KittyGraphicsImage) Format() (KittyImageFormat, error) {
 	var v C.GhosttyKittyImageFormat
 	if err := resultError(C.ghostty_kitty_graphics_image_get(
 		img.ptr,
-		C.GHOSTTY_KITTY_IMAGE_DATA_FORMAT,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_FORMAT,
 		unsafe.Pointer(&v),
 	)); err != nil {
 		return 0, err
@@ -642,7 +603,7 @@ func (img *KittyGraphicsImage) Compression() (KittyImageCompression, error) {
 	var v C.GhosttyKittyImageCompression
 	if err := resultError(C.ghostty_kitty_graphics_image_get(
 		img.ptr,
-		C.GHOSTTY_KITTY_IMAGE_DATA_COMPRESSION,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_COMPRESSION,
 		unsafe.Pointer(&v),
 	)); err != nil {
 		return 0, err
@@ -657,7 +618,7 @@ func (img *KittyGraphicsImage) Generation() (uint64, error) {
 	var generation C.uint64_t
 	if err := resultError(C.ghostty_kitty_graphics_image_get(
 		img.ptr,
-		C.GHOSTTY_KITTY_IMAGE_DATA_GENERATION,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_GENERATION,
 		unsafe.Pointer(&generation),
 	)); err != nil {
 		return 0, err
@@ -665,10 +626,9 @@ func (img *KittyGraphicsImage) Generation() (uint64, error) {
 	return uint64(generation), nil
 }
 
-// Info returns all image metadata with a batched metadata query followed by a
-// payload query. This is more efficient than calling every getter
-// individually. Pending images still return their metadata, expected DataLen,
-// and DataPending=true while Data remains nil.
+// Info returns all image metadata and pixels in a single cgo call. This is more
+// efficient than calling every getter individually. Pending images still return
+// their metadata and ExpectedLen, with PixelsPending=true and Pixels nil.
 func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 	// Output variables — one per field, typed to match the C API.
 	var (
@@ -679,19 +639,23 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 		format      C.GhosttyKittyImageFormat
 		compression C.GhosttyKittyImageCompression
 		generation  C.uint64_t
-		dataLen     C.size_t
+		expectedLen C.size_t
+		pixels      C.GhosttyString
 	)
 
-	// Keys identify which fields to fetch; order must match values.
+	// Keys identify which fields to fetch; order must match values. Pixels
+	// must stay last. get_multi stops at the first key that fails, and a pending
+	// image fails only on its pixels, so every other value is still written.
 	keys := [...]C.GhosttyKittyGraphicsImageData{
-		C.GHOSTTY_KITTY_IMAGE_DATA_ID,
-		C.GHOSTTY_KITTY_IMAGE_DATA_NUMBER,
-		C.GHOSTTY_KITTY_IMAGE_DATA_WIDTH,
-		C.GHOSTTY_KITTY_IMAGE_DATA_HEIGHT,
-		C.GHOSTTY_KITTY_IMAGE_DATA_FORMAT,
-		C.GHOSTTY_KITTY_IMAGE_DATA_COMPRESSION,
-		C.GHOSTTY_KITTY_IMAGE_DATA_GENERATION,
-		C.GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_ID,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_NUMBER,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_WIDTH,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_HEIGHT,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_FORMAT,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_COMPRESSION,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_GENERATION,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_EXPECTED_LEN,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_PIXELS,
 	}
 
 	// Each value pointer receives the corresponding field from C.
@@ -703,7 +667,8 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 		unsafe.Pointer(&format),
 		unsafe.Pointer(&compression),
 		unsafe.Pointer(&generation),
-		unsafe.Pointer(&dataLen),
+		unsafe.Pointer(&expectedLen),
+		unsafe.Pointer(&pixels),
 	}
 
 	// Copy the output pointers into C memory. See get_multi.go.
@@ -713,101 +678,89 @@ func (img *KittyGraphicsImage) Info() (*KittyGraphicsImageInfo, error) {
 	}
 	defer args.free()
 
-	if err := resultError(C.ghostty_kitty_graphics_image_get_multi(
+	var written C.size_t
+	result := C.ghostty_kitty_graphics_image_get_multi(
 		img.ptr,
 		C.size_t(len(keys)),
 		&keys[0],
 		args.values,
-		nil,
-	)); err != nil {
+		&written,
+	)
+
+	// NO_VALUE from the last key means the image is pending. From any other key
+	// it would leave fields unset, so it is a real error like any other result.
+	pending := result == C.GHOSTTY_NO_VALUE && int(written) == len(keys)-1
+	if err := resultError(result); err != nil && !pending {
 		return nil, err
 	}
 
 	info := &KittyGraphicsImageInfo{
-		ID:          uint32(id),
-		Number:      uint32(number),
-		Width:       uint32(width),
-		Height:      uint32(height),
-		Format:      KittyImageFormat(format),
-		Compression: KittyImageCompression(compression),
-		Generation:  uint64(generation),
-		DataLen:     uint(dataLen),
+		ID:            uint32(id),
+		Number:        uint32(number),
+		Width:         uint32(width),
+		Height:        uint32(height),
+		Format:        KittyImageFormat(format),
+		Compression:   KittyImageCompression(compression),
+		Generation:    uint64(generation),
+		ExpectedLen:   uint(expectedLen),
+		PixelsPending: pending,
+	}
+	if pending {
+		return info, nil
 	}
 
-	var dataPtr *C.uint8_t
-	err := resultError(C.ghostty_kitty_graphics_image_get(
-		img.ptr,
-		C.GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR,
-		unsafe.Pointer(&dataPtr),
-	))
-	if err != nil {
-		var resultErr *Error
-		if errors.As(err, &resultErr) && resultErr.Result == ResultNoValue {
-			info.DataPending = true
-			return info, nil
-		}
+	var err error
+	if info.Pixels, err = borrowGhosttyBytes(pixels); err != nil {
 		return nil, err
 	}
-
-	length, valid := ghosttySizeToInt(dataLen)
-	if !valid {
-		return nil, &Error{Result: ResultLimitExceeded}
-	}
-	if dataPtr != nil && length > 0 {
-		info.Data = unsafe.Slice((*byte)(unsafe.Pointer(dataPtr)), length)
-	}
-
 	return info, nil
 }
 
-// Data returns a borrowed slice of the raw pixel data for the current animation
-// frame. The slice is only valid until the next mutating terminal call. A
-// pending image returns an error with [ResultNoValue]; use
-// [KittyGraphicsImage.DataLen] to inspect its expected payload length. Use
+// Pixels returns a borrowed slice of the raw pixel data for the current
+// animation frame. The slice is only valid until the next mutating terminal
+// call. A pending image returns an error with [ResultNoValue]; use
+// [KittyGraphicsImage.ExpectedLen] to inspect its expected size. Use
 // [KittyGraphicsImage.Generation] to invalidate frame caches.
-func (img *KittyGraphicsImage) Data() ([]byte, error) {
-	var ptr *C.uint8_t
+func (img *KittyGraphicsImage) Pixels() ([]byte, error) {
+	var pixels C.GhosttyString
 	if err := resultError(C.ghostty_kitty_graphics_image_get(
 		img.ptr,
-		C.GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR,
-		unsafe.Pointer(&ptr),
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_PIXELS,
+		unsafe.Pointer(&pixels),
 	)); err != nil {
 		return nil, err
 	}
-
-	var length C.size_t
-	if err := resultError(C.ghostty_kitty_graphics_image_get(
-		img.ptr,
-		C.GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN,
-		unsafe.Pointer(&length),
-	)); err != nil {
-		return nil, err
-	}
-
-	count, valid := ghosttySizeToInt(length)
-	if !valid {
-		return nil, &Error{Result: ResultLimitExceeded}
-	}
-	if ptr == nil || count == 0 {
-		return nil, nil
-	}
-
-	return unsafe.Slice((*byte)(unsafe.Pointer(ptr)), count), nil
+	return borrowGhosttyBytes(pixels)
 }
 
-// DataLen returns the decoded pixel payload length in bytes. For a pending
-// image this is the expected length reserved against the storage limit even
-// though [KittyGraphicsImage.Data] returns [ResultNoValue].
-func (img *KittyGraphicsImage) DataLen() (uint, error) {
+// ExpectedLen returns the size of the image's pixel data in bytes, which is
+// width * height * bytes per pixel for the reported format. For a pending image
+// this is the size reserved against the storage limit even though
+// [KittyGraphicsImage.Pixels] returns [ResultNoValue].
+func (img *KittyGraphicsImage) ExpectedLen() (uint, error) {
 	var length C.size_t
 	if err := resultError(C.ghostty_kitty_graphics_image_get(
 		img.ptr,
-		C.GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN,
+		C.GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_EXPECTED_LEN,
 		unsafe.Pointer(&length),
 	)); err != nil {
 		return 0, err
 	}
 	return uint(length), nil
+}
+
+// borrowGhosttyBytes views a borrowed GhosttyString as a Go byte slice without
+// copying it. The slice is only valid for as long as the string is. It returns
+// nil for an empty string.
+func borrowGhosttyBytes(value C.GhosttyString) ([]byte, error) {
+	length, valid := ghosttySizeToInt(value.len)
+	if !valid {
+		return nil, &Error{Result: ResultLimitExceeded}
+	}
+	if value.ptr == nil || length == 0 {
+		return nil, nil
+	}
+	return unsafe.Slice((*byte)(unsafe.Pointer(value.ptr)), length), nil
 }
 
 // NewKittyGraphicsPlacementIterator creates a new placement iterator.
@@ -832,14 +785,24 @@ func (it *KittyGraphicsPlacementIterator) Close() {
 	it.ptr = nil
 }
 
-// SetLayer sets the z-layer filter for the iterator. Only placements
-// matching the given layer will be returned by Next. The default is
-// KittyPlacementLayerAll (no filtering).
-func (it *KittyGraphicsPlacementIterator) SetLayer(layer KittyPlacementLayer) error {
-	v := C.GhosttyKittyPlacementLayer(layer)
+// SetLayers filters the placements returned by Next to the layers in mask,
+// which can select more than one layer:
+//
+//	iter.SetLayers(ImageLayerMaskBelowText | ImageLayerMaskAboveText)
+//
+// The default is no filter. A mask of zero also means no filter, not "nothing",
+// so a mask built by removing layers must not end up empty if it should match
+// nothing. A mask with a bit that matches no layer returns an error and keeps
+// the current filter.
+//
+// This filter only applies to the storage iterator. When drawing, use
+// [RenderStateImageInfo.Layer] instead. It follows the same rules and also
+// covers virtual placements.
+func (it *KittyGraphicsPlacementIterator) SetLayers(mask ImageLayerMask) error {
+	v := C.uint32_t(mask)
 	return resultError(C.ghostty_kitty_graphics_placement_iterator_set(
 		it.ptr,
-		C.GHOSTTY_KITTY_GRAPHICS_PLACEMENT_ITERATOR_OPTION_LAYER,
+		C.GHOSTTY_KITTY_GRAPHICS_PLACEMENT_ITERATOR_OPT_LAYER,
 		unsafe.Pointer(&v),
 	))
 }
@@ -1193,7 +1156,7 @@ func (it *KittyGraphicsPlacementIterator) RenderInfo(img *KittyGraphicsImage, t 
 // Virtual placements (unicode placeholders) return an error with
 // ResultNoValue.
 func (it *KittyGraphicsPlacementIterator) Rect(img *KittyGraphicsImage, t *Terminal) (*Selection, error) {
-	cs := C.init_selection()
+	var cs C.GhosttySelection
 	if err := resultError(C.ghostty_kitty_graphics_placement_rect(
 		it.ptr,
 		img.ptr,
