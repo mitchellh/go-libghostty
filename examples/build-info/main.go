@@ -30,12 +30,12 @@ func main() {
 	fmt.Printf("Snapshots: %s\n", boolStr(info.FeatureSnapshot))
 
 	// The headers are fixed when this program is compiled, while the library
-	// can differ when it is linked as a shared library. Until 1.0, the minor
-	// versions must match for the two to be compatible.
+	// can differ when it is linked as a shared library. The major versions must
+	// match, and the library may be newer than the headers but not older.
 	fmt.Printf("Headers: %s\n", libghostty.HeaderVersion)
 	fmt.Printf("Library: %s\n", libghostty.Version())
 	if info.VersionMajor != libghostty.HeaderVersionMajor ||
-		info.VersionMinor != libghostty.HeaderVersionMinor {
+		info.VersionMinor < libghostty.HeaderVersionMinor {
 		log.Fatal("library is not compatible with the headers")
 	}
 

@@ -582,6 +582,23 @@ func TestRenderStateRowCellsColors(t *testing.T) {
 	if fg != nil {
 		t.Fatalf("expected nil fg for unstyled cell, got %+v", *fg)
 	}
+	bg, err = rc.BgColor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bg != nil {
+		t.Fatalf("expected nil bg for unstyled cell, got %+v", *bg)
+	}
+
+	// StyleInto reads the same keys in its C helper, which has to treat the
+	// missing colors as absent rather than as an error.
+	var style RenderCellStyle
+	if err := rc.StyleInto(&style); err != nil {
+		t.Fatal(err)
+	}
+	if style.HasForeground || style.HasBackground {
+		t.Fatalf("expected no colors for unstyled cell, got %+v", style)
+	}
 }
 
 func testRenderStateRowCells(t *testing.T, text string) *RenderStateRowCells {

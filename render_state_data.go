@@ -181,8 +181,7 @@ func (rs *RenderState) ColorCursor() (*ColorRGB, error) {
 	var v C.GhosttyColorRgb
 	err := resultError(C.ghostty_render_state_get(rs.ptr, C.GHOSTTY_RENDER_STATE_DATA_COLOR_CURSOR, unsafe.Pointer(&v)))
 	if err != nil {
-		var ge *Error
-		if errors.As(err, &ge) && ge.Result == ResultInvalidValue {
+		if isResult(err, ResultNoValue) {
 			return nil, nil
 		}
 		return nil, err

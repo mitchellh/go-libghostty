@@ -955,7 +955,7 @@ type UnknownSequenceFn func(t *Terminal, sequence TerminalUnknownSequence)
 // that uses render holds. A hold ends when VT input disables synchronized
 // output, the terminal is reset, or the terminal is resized. Repeating the
 // current synchronized output setting does not call the function again.
-// Changing [ModeSyncOutput] with [Terminal.SetMode] does not call the function.
+// Changing [ModeSynchronizedOutput] with [Terminal.SetMode] does not call the function.
 //
 // The function runs synchronously on the goroutine that triggered it. Most
 // often that is [Terminal.VTWrite] or [Terminal.VTWriteUntil] processing
@@ -972,7 +972,7 @@ type UnknownSequenceFn func(t *Terminal, sequence TerminalUnknownSequence)
 // when the function is attached, most commonly one restored by
 // [SnapshotDecoder] from a snapshot taken during synchronized output. No call
 // with held true follows for that hold; the first call is held false when it
-// ends. Check [Terminal.Mode] with [ModeSyncOutput] after attaching to learn
+// ends. Check [Terminal.Mode] with [ModeSynchronizedOutput] after attaching to learn
 // the initial state.
 //
 // libghostty does not time out render holds. Applications should stop honoring
@@ -1008,8 +1008,9 @@ type ColorSchemeFn func(t *Terminal) (ColorScheme, bool)
 
 // DeviceAttributesFn is called for device attributes queries
 // (CSI c / CSI > c / CSI = c). The first parameter is the terminal
-// that triggered the effect. Return the attributes and true,
-// or zero value and false to ignore the query.
+// that triggered the effect. Return the attributes and true, or zero
+// value and false to answer with the library's default attributes (a
+// VT220 with ANSI color).
 // C: GhosttyTerminalDeviceAttributesFn
 type DeviceAttributesFn func(t *Terminal) (DeviceAttributes, bool)
 
@@ -1293,8 +1294,9 @@ func WithColorScheme(fn ColorSchemeFn) TerminalOption {
 
 // WithDeviceAttributes registers an effect handler invoked for
 // device attributes queries (CSI c / CSI > c / CSI = c). Return
-// the attributes and true, or zero value and false to silently
-// ignore the query.
+// the attributes and true, or zero value and false to answer with the
+// library's default attributes. Without a handler, the library answers
+// with those same defaults.
 func WithDeviceAttributes(fn DeviceAttributesFn) TerminalOption {
 	return func(c *TerminalConfig) {
 		c.onDeviceAttributes = fn
@@ -1483,10 +1485,10 @@ func (t *Terminal) Reset() {
 // When wraparound mode is enabled, text on the primary screen is rewrapped
 // to fit the new width. Text on the alternate screen is never rewrapped.
 //
-// Resize also turns off [ModeSyncOutput] so the resized screen is shown
+// Resize also turns off [ModeSynchronizedOutput] so the resized screen is shown
 // right away. If synchronized output was on, Resize ends the render hold
 // and calls the [RenderHoldFunc] with held false before returning. If
-// [ModeInBandResize] is on, Resize sends the new size to the program
+// [ModeInBandSizeReports] is on, Resize sends the new size to the program
 // running in the terminal.
 //
 // Calling Resize with the current cols and rows leaves the screen contents

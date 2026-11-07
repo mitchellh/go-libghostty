@@ -217,10 +217,10 @@ func TestTerminalWithRenderHold(t *testing.T) {
 
 	// Direct mode changes update terminal state without reporting render hold
 	// transitions. Only changes caused by VT input, reset, or resize report it.
-	if err := term.SetMode(ModeSyncOutput, true); err != nil {
+	if err := term.SetMode(ModeSynchronizedOutput, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := term.SetMode(ModeSyncOutput, false); err != nil {
+	if err := term.SetMode(ModeSynchronizedOutput, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -893,6 +893,68 @@ func TestTerminalAdditionalOptions(t *testing.T) {
 	}
 	if err := term.SetDefaultCursorBlink(nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestTerminalGlyphProtocolOptIn checks that Glyph Protocol is off until the
+// application enables it. A support query only gets a reply while it is on.
+func TestTerminalGlyphProtocolOptIn(t *testing.T) {
+	const query = "\x1b_25a1;s\x1b\\"
+	const reply = "\x1b_25a1;s;fmt=glyf\x1b\\"
+
+	var received []byte
+	term, err := NewTerminal(WithSize(80, 24), WithWritePty(func(_ *Terminal, data []byte) {
+		received = append(received, data...)
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	term.VTWrite([]byte(query))
+	if len(received) != 0 {
+		t.Fatalf("expected no reply by default, got %q", received)
+	}
+
+	if err := term.SetGlyphProtocol(true); err != nil {
+		t.Fatal(err)
+	}
+	term.VTWrite([]byte(query))
+	if string(received) != reply {
+		t.Fatalf("expected reply %q when enabled, got %q", reply, received)
+	}
+
+	received = nil
+	if err := term.SetGlyphProtocol(false); err != nil {
+		t.Fatal(err)
+	}
+	term.VTWrite([]byte(query))
+	if len(received) != 0 {
+		t.Fatalf("expected no reply when disabled, got %q", received)
+	}
+}
+
+// TestTerminalDeviceAttributesDefault checks that a handler returning false
+// gets the library's default reply, the same as having no handler.
+func TestTerminalDeviceAttributesDefault(t *testing.T) {
+	var received []byte
+	term, err := NewTerminal(
+		WithSize(80, 24),
+		WithWritePty(func(_ *Terminal, data []byte) {
+			received = append(received, data...)
+		}),
+		WithDeviceAttributes(func(_ *Terminal) (DeviceAttributes, bool) {
+			return DeviceAttributes{}, false
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	term.VTWrite([]byte("\x1b[c"))
+	if want := "\x1b[?62;22c"; string(received) != want {
+		t.Fatalf("expected default reply %q, got %q", want, received)
 	}
 }
 

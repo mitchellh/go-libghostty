@@ -334,6 +334,33 @@ func TestTerminalVTGround(t *testing.T) {
 	}
 }
 
+// TestTerminalCursorSGRStyle checks that the cursor's SGR style follows the
+// style for newly printed text.
+func TestTerminalCursorSGRStyle(t *testing.T) {
+	term, err := NewTerminal(WithSize(80, 24))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+
+	style, err := term.CursorSGRStyle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !style.IsDefault() {
+		t.Fatal("expected default SGR style")
+	}
+
+	term.VTWrite([]byte("\x1b[1m"))
+	style, err = term.CursorSGRStyle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !style.Bold() {
+		t.Fatal("expected bold SGR style")
+	}
+}
+
 func TestTerminalCursorAtPrompt(t *testing.T) {
 	term, err := NewTerminal(WithSize(80, 24))
 	if err != nil {

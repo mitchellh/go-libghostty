@@ -887,7 +887,7 @@ func TestSnapshotRestoresRenderHoldState(t *testing.T) {
 	}
 	defer term.Close()
 
-	held, err := term.Mode(ModeSyncOutput)
+	held, err := term.Mode(ModeSynchronizedOutput)
 	if err != nil {
 		t.Fatal(err)
 	}

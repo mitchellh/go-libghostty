@@ -258,7 +258,10 @@ func (t *Terminal) SetDefaultCursorStyle(style *CursorStyle) error {
 	))
 }
 
-// SetGlyphProtocol enables or disables Glyph Protocol APC handling.
+// SetGlyphProtocol enables or disables Glyph Protocol APC handling. It is
+// disabled by default, because registered glyphs change what the terminal
+// draws, so an application has to opt in. Disabling it clears the terminal's
+// glyph glossary.
 func (t *Terminal) SetGlyphProtocol(enabled bool) error {
 	v := C.bool(enabled)
 	return resultError(C.ghostty_terminal_set(

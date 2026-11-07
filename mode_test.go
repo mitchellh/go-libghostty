@@ -23,19 +23,19 @@ func TestModeValueDEC(t *testing.T) {
 }
 
 func TestModeVisibilityReport(t *testing.T) {
-	if got := ModeVisibilityReport.Value(); got != 2033 {
+	if got := ModeReportVisibility.Value(); got != 2033 {
 		t.Fatalf("expected value 2033, got %d", got)
 	}
-	if ModeVisibilityReport.ANSI() {
+	if ModeReportVisibility.ANSI() {
 		t.Fatal("expected DEC private mode")
 	}
 }
 
 func TestModePasteEvents(t *testing.T) {
-	if got := ModePasteEvents.Value(); got != 5522 {
+	if got := ModeKittyPasteEvents.Value(); got != 5522 {
 		t.Fatalf("expected value 5522, got %d", got)
 	}
-	if ModePasteEvents.ANSI() {
+	if ModeKittyPasteEvents.ANSI() {
 		t.Fatal("expected DEC private mode")
 	}
 }

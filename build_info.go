@@ -195,13 +195,14 @@ func GetBuildInfo() (BuildInfo, error) {
 }
 
 // Version returns the full version of the loaded library, such as
-// "0.1.0-dev+9a018f5cc". It is the same text as [BuildInfo.VersionString], but
+// "1.1.0-dev+9a018f5cc". It is the same text as [BuildInfo.VersionString], but
 // needs no query and cannot fail.
 //
 // Compare it with [HeaderVersion] to see what this package was compiled
 // against. The two can differ when linking the shared library, which is where
-// the check matters: every 0.x release uses the same shared library name, so
-// the system will load a 0.2 library for a program built against 0.1.
+// the check matters: every 1.x release uses the same shared library name, so
+// the system can load an older 1.x library than the one this package was built
+// against.
 // C: ghostty_version
 func Version() string {
 	return C.GoString(C.ghostty_version())

@@ -253,7 +253,7 @@ func TestTerminalPasteKittyEventUsesSecureRandom(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer term.Close()
-	if err := term.SetMode(ModePasteEvents, true); err != nil {
+	if err := term.SetMode(ModeKittyPasteEvents, true); err != nil {
 		t.Fatal(err)
 	}
 

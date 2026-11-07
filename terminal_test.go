@@ -474,8 +474,8 @@ func TestTerminalModeVTWrite(t *testing.T) {
 		{"BackarrowKeyMode", ModeBackarrowKeyMode, "\x1b[?67h", "\x1b[?67l", false},
 		{"CursorVisible", ModeCursorVisible, "\x1b[?25h", "\x1b[?25l", true},
 		{"FocusEvent", ModeFocusEvent, "\x1b[?1004h", "\x1b[?1004l", false},
-		{"NormalMouse", ModeNormalMouse, "\x1b[?1000h", "\x1b[?1000l", false},
-		{"SGRMouse", ModeSGRMouse, "\x1b[?1006h", "\x1b[?1006l", false},
+		{"MouseEventNormal", ModeMouseEventNormal, "\x1b[?1000h", "\x1b[?1000l", false},
+		{"MouseFormatSGR", ModeMouseFormatSGR, "\x1b[?1006h", "\x1b[?1006l", false},
 		{"Insert", ModeInsert, "\x1b[4h", "\x1b[4l", false},
 	}
 
