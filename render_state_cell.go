@@ -76,7 +76,7 @@ static inline render_cell_style_snapshot_result render_cell_style_snapshot_get(
 	);
 	if (result == GHOSTTY_SUCCESS) {
 		out.style.has_foreground = true;
-	} else if (result != GHOSTTY_INVALID_VALUE) {
+	} else if (result != GHOSTTY_NO_VALUE) {
 		out.result = result;
 		return out;
 	}
@@ -88,7 +88,7 @@ static inline render_cell_style_snapshot_result render_cell_style_snapshot_get(
 	);
 	if (result == GHOSTTY_SUCCESS) {
 		out.style.has_background = true;
-	} else if (result != GHOSTTY_INVALID_VALUE) {
+	} else if (result != GHOSTTY_NO_VALUE) {
 		out.result = result;
 		return out;
 	}
@@ -503,7 +503,7 @@ func (rc *RenderStateRowCells) BgColor() (*ColorRGB, error) {
 	err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, unsafe.Pointer(&v)))
 	if err != nil {
 		var ge *Error
-		if errors.As(err, &ge) && ge.Result == ResultInvalidValue {
+		if errors.As(err, &ge) && ge.Result == ResultNoValue {
 			return nil, nil
 		}
 		return nil, err
@@ -521,7 +521,7 @@ func (rc *RenderStateRowCells) FgColor() (*ColorRGB, error) {
 	err := resultError(C.ghostty_render_state_row_cells_get(rc.ptr, C.GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR, unsafe.Pointer(&v)))
 	if err != nil {
 		var ge *Error
-		if errors.As(err, &ge) && ge.Result == ResultInvalidValue {
+		if errors.As(err, &ge) && ge.Result == ResultNoValue {
 			return nil, nil
 		}
 		return nil, err

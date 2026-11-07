@@ -62,7 +62,7 @@ const (
 
 	// TerminalDataCursorStyle is the current SGR style of the cursor
 	// (GhosttyStyle).
-	TerminalDataCursorStyle TerminalData = C.GHOSTTY_TERMINAL_DATA_CURSOR_STYLE
+	TerminalDataCursorStyle TerminalData = C.GHOSTTY_TERMINAL_DATA_CURSOR_SGR_STYLE
 
 	// TerminalDataMouseTracking indicates whether any mouse tracking mode
 	// is active (bool).
@@ -335,7 +335,7 @@ func (t *Terminal) CursorPendingWrap() (bool, error) {
 // the style that will be applied to newly printed characters.
 func (t *Terminal) CursorStyle() (*Style, error) {
 	var cs C.GhosttyStyle
-	if err := resultError(C.ghostty_terminal_get(t.ptr, C.GHOSTTY_TERMINAL_DATA_CURSOR_STYLE, unsafe.Pointer(&cs))); err != nil {
+	if err := resultError(C.ghostty_terminal_get(t.ptr, C.GHOSTTY_TERMINAL_DATA_CURSOR_SGR_STYLE, unsafe.Pointer(&cs))); err != nil {
 		return nil, err
 	}
 	return &Style{c: cs}, nil

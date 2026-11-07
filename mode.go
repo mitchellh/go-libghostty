@@ -33,13 +33,13 @@ func (m Mode) ANSI() bool {
 // ANSI modes.
 var (
 	// ModeKAM is keyboard action mode (disable keyboard).
-	ModeKAM = Mode(C.GHOSTTY_MODE_KAM)
+	ModeKAM = Mode(C.GHOSTTY_MODE_DISABLE_KEYBOARD)
 
 	// ModeInsert is insert mode.
 	ModeInsert = Mode(C.GHOSTTY_MODE_INSERT)
 
 	// ModeSRM is send/receive mode.
-	ModeSRM = Mode(C.GHOSTTY_MODE_SRM)
+	ModeSRM = Mode(C.GHOSTTY_MODE_SEND_RECEIVE_MODE)
 
 	// ModeLinefeed is linefeed/new line mode.
 	ModeLinefeed = Mode(C.GHOSTTY_MODE_LINEFEED)
@@ -48,7 +48,7 @@ var (
 // DEC private modes.
 var (
 	// ModeDECCKM is cursor keys mode.
-	ModeDECCKM = Mode(C.GHOSTTY_MODE_DECCKM)
+	ModeDECCKM = Mode(C.GHOSTTY_MODE_CURSOR_KEYS)
 
 	// Mode132Column is 132/80 column mode.
 	Mode132Column = Mode(C.GHOSTTY_MODE_132_COLUMN)
@@ -69,7 +69,7 @@ var (
 	ModeAutorepeat = Mode(C.GHOSTTY_MODE_AUTOREPEAT)
 
 	// ModeX10Mouse is X10 mouse reporting mode.
-	ModeX10Mouse = Mode(C.GHOSTTY_MODE_X10_MOUSE)
+	ModeX10Mouse = Mode(C.GHOSTTY_MODE_MOUSE_EVENT_X10)
 
 	// ModeCursorBlinking is cursor blink mode.
 	ModeCursorBlinking = Mode(C.GHOSTTY_MODE_CURSOR_BLINKING)
@@ -93,46 +93,46 @@ var (
 	ModeBackarrowKeyMode = Mode(C.GHOSTTY_MODE_BACKARROW_KEY_MODE)
 
 	// ModeLeftRightMargin is left/right margin mode.
-	ModeLeftRightMargin = Mode(C.GHOSTTY_MODE_LEFT_RIGHT_MARGIN)
+	ModeLeftRightMargin = Mode(C.GHOSTTY_MODE_ENABLE_LEFT_AND_RIGHT_MARGIN)
 
 	// ModeNormalMouse is normal mouse tracking mode.
-	ModeNormalMouse = Mode(C.GHOSTTY_MODE_NORMAL_MOUSE)
+	ModeNormalMouse = Mode(C.GHOSTTY_MODE_MOUSE_EVENT_NORMAL)
 
 	// ModeButtonMouse is button-event mouse tracking mode.
-	ModeButtonMouse = Mode(C.GHOSTTY_MODE_BUTTON_MOUSE)
+	ModeButtonMouse = Mode(C.GHOSTTY_MODE_MOUSE_EVENT_BUTTON)
 
 	// ModeAnyMouse is any-event mouse tracking mode.
-	ModeAnyMouse = Mode(C.GHOSTTY_MODE_ANY_MOUSE)
+	ModeAnyMouse = Mode(C.GHOSTTY_MODE_MOUSE_EVENT_ANY)
 
 	// ModeFocusEvent enables focus in/out events.
 	ModeFocusEvent = Mode(C.GHOSTTY_MODE_FOCUS_EVENT)
 
 	// ModeUTF8Mouse is UTF-8 mouse format mode.
-	ModeUTF8Mouse = Mode(C.GHOSTTY_MODE_UTF8_MOUSE)
+	ModeUTF8Mouse = Mode(C.GHOSTTY_MODE_MOUSE_FORMAT_UTF8)
 
 	// ModeSGRMouse is SGR mouse format mode.
-	ModeSGRMouse = Mode(C.GHOSTTY_MODE_SGR_MOUSE)
+	ModeSGRMouse = Mode(C.GHOSTTY_MODE_MOUSE_FORMAT_SGR)
 
 	// ModeAltScroll is alternate scroll mode.
-	ModeAltScroll = Mode(C.GHOSTTY_MODE_ALT_SCROLL)
+	ModeAltScroll = Mode(C.GHOSTTY_MODE_MOUSE_ALTERNATE_SCROLL)
 
 	// ModeURxvtMouse is URxvt mouse format mode.
-	ModeURxvtMouse = Mode(C.GHOSTTY_MODE_URXVT_MOUSE)
+	ModeURxvtMouse = Mode(C.GHOSTTY_MODE_MOUSE_FORMAT_URXVT)
 
 	// ModeSGRPixelsMouse is SGR-Pixels mouse format mode.
-	ModeSGRPixelsMouse = Mode(C.GHOSTTY_MODE_SGR_PIXELS_MOUSE)
+	ModeSGRPixelsMouse = Mode(C.GHOSTTY_MODE_MOUSE_FORMAT_SGR_PIXELS)
 
 	// ModeNumlockKeypad ignores keypad with NumLock.
-	ModeNumlockKeypad = Mode(C.GHOSTTY_MODE_NUMLOCK_KEYPAD)
+	ModeNumlockKeypad = Mode(C.GHOSTTY_MODE_IGNORE_KEYPAD_WITH_NUMLOCK)
 
 	// ModeAltEscPrefix makes Alt key send ESC prefix.
 	ModeAltEscPrefix = Mode(C.GHOSTTY_MODE_ALT_ESC_PREFIX)
 
 	// ModeAltSendsEsc makes Alt send escape.
-	ModeAltSendsEsc = Mode(C.GHOSTTY_MODE_ALT_SENDS_ESC)
+	ModeAltSendsEsc = Mode(C.GHOSTTY_MODE_ALT_SENDS_ESCAPE)
 
 	// ModeReverseWrapExt is extended reverse wrap mode.
-	ModeReverseWrapExt = Mode(C.GHOSTTY_MODE_REVERSE_WRAP_EXT)
+	ModeReverseWrapExt = Mode(C.GHOSTTY_MODE_REVERSE_WRAP_EXTENDED)
 
 	// ModeAltScreen is alternate screen mode (mode 1047).
 	ModeAltScreen = Mode(C.GHOSTTY_MODE_ALT_SCREEN)
@@ -141,28 +141,28 @@ var (
 	ModeSaveCursor = Mode(C.GHOSTTY_MODE_SAVE_CURSOR)
 
 	// ModeAltScreenSave is alt screen + save cursor + clear (mode 1049).
-	ModeAltScreenSave = Mode(C.GHOSTTY_MODE_ALT_SCREEN_SAVE)
+	ModeAltScreenSave = Mode(C.GHOSTTY_MODE_ALT_SCREEN_SAVE_CURSOR_CLEAR_ENTER)
 
 	// ModeBracketedPaste is bracketed paste mode.
 	ModeBracketedPaste = Mode(C.GHOSTTY_MODE_BRACKETED_PASTE)
 
 	// ModeSyncOutput is synchronized output mode.
-	ModeSyncOutput = Mode(C.GHOSTTY_MODE_SYNC_OUTPUT)
+	ModeSyncOutput = Mode(C.GHOSTTY_MODE_SYNCHRONIZED_OUTPUT)
 
 	// ModeGraphemeCluster is grapheme cluster mode.
 	ModeGraphemeCluster = Mode(C.GHOSTTY_MODE_GRAPHEME_CLUSTER)
 
 	// ModeColorSchemeReport enables color scheme reporting.
-	ModeColorSchemeReport = Mode(C.GHOSTTY_MODE_COLOR_SCHEME_REPORT)
+	ModeColorSchemeReport = Mode(C.GHOSTTY_MODE_REPORT_COLOR_SCHEME)
 
 	// ModeVisibilityReport enables terminal visibility reporting.
-	ModeVisibilityReport = Mode(C.GHOSTTY_MODE_VISIBILITY_REPORT)
+	ModeVisibilityReport = Mode(C.GHOSTTY_MODE_REPORT_VISIBILITY)
 
 	// ModeInBandResize enables in-band size reports.
-	ModeInBandResize = Mode(C.GHOSTTY_MODE_IN_BAND_RESIZE)
+	ModeInBandResize = Mode(C.GHOSTTY_MODE_IN_BAND_SIZE_REPORTS)
 
 	// ModePasteEvents enables Kitty clipboard protocol paste events.
-	ModePasteEvents = Mode(C.GHOSTTY_MODE_PASTE_EVENTS)
+	ModePasteEvents = Mode(C.GHOSTTY_MODE_KITTY_PASTE_EVENTS)
 )
 
 // ModeReportState represents DECRPM report state values (Ps2 parameter).

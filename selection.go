@@ -838,7 +838,7 @@ func (t *Terminal) SelectAll() (*Selection, error) {
 // command output.
 func (t *Terminal) SelectOutput(options SelectOutputOptions) (*Selection, error) {
 	var cs C.GhosttySelection
-	if err := resultError(C.ghostty_terminal_select_output(t.ptr, options.Ref.ref, &cs)); err != nil {
+	if err := resultError(C.ghostty_terminal_select_output(t.ptr, &options.Ref.ref, &cs)); err != nil {
 		return noValueNilSelection(err)
 	}
 
